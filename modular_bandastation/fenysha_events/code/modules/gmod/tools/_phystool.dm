@@ -18,40 +18,37 @@
 	drop_sound = 'sound/items/handling/tools/screwdriver_drop.ogg'
 	pickup_sound = 'modular_bandastation/fenysha_events/sounds/tools/phystools/physgun_pickup.ogg'
 
-	/// Наш персональный цвет, который мы выбрали для пушки
+	/// Персональный цвет пушки
 	var/personal_color = COLOR_TAN_ORANGE
-	/// Цвет эффектов физпушки, равен personal_color, устанавливается при инициализации
+	/// Цвет эффектов пушки, обычно равен personal_color
 	var/effects_color = null
-	/// Усиленный захват
+	/// Имеет лиэта пушка усиленный захват
 	var/force_grab = FALSE
-	/// Продвинутый режим (разрешает больше действий)
+	/// Имеет ли пушка продвинутные функции, вроде физического ипульса
 	var/advanced = FALSE
-	/// Коллдаун между использованиями
-	var/use_cooldown = 3 SECONDS
-	/// Максимальная дистанция граба обьекта(и удержания)
-	var/maximum_distance = 4
-
+	/// Коллдаун между грабами обьектов
+	var/use_cooldown = 1.5 SECONDS
+	/// Максимальная дистанция работы пушки
+	var/maximum_distance = 8
 
 	/// Перетаскиваемый объект
 	var/atom/movable/handled_atom
-	/// Пользователь физпушки
+	/// Ссылка на компонент захвата
+	var/datum/component/physgun_grab/current_grab_component
+	/// Пользователь
 	var/mob/living/physgun_user
-	/// Бим между пользователем и объектом
+	/// Бим
 	var/datum/beam/physgun_beam
-	/// Экранный элемент, следящий за курсором
+	/// Курсор-кэтчер
 	var/atom/movable/screen/fullscreen/cursor_catcher/physgun_catcher
 
 	COOLDOWN_DECLARE(grab_cooldown)
 	var/datum/looping_sound/gravgen/kinesis/phys_gun/loop_sound
 
-	/// Сохранённые исходные смещения пикселей объекта
-	var/stored_pixel_x = 0
-	var/stored_pixel_y = 0
 
 /obj/item/physgun/Initialize(mapload)
 	effects_color = personal_color
 	. = ..()
-
 	loop_sound = new(src)
 
 /obj/item/physgun/Destroy(force)
@@ -60,12 +57,11 @@
 		release_atom()
 	qdel(loop_sound)
 
-
 /obj/item/physgun/worn_overlays(mutable_appearance/standing, isinhands, icon_file)
 	. = ..()
 	if(!isinhands)
 		return
-	var/mutable_appearance/overlay = emissive_appearance(icon_file, "gravitygun_overlay")
+	var/mutable_appearance/overlay = emissive_appearance(icon_file, "gravitygun_overlay", src)
 	overlay.color = personal_color ? personal_color : initial(personal_color)
 	. += overlay
 
@@ -75,8 +71,19 @@
 	color_appearance.color = personal_color ? personal_color : initial(personal_color)
 	. += color_appearance
 
+/obj/item/physgun/pickup(mob/user)
+	. = ..()
+	RegisterSignal(user, COMSIG_MOB_CLICKON, PROC_REF(on_clicked), TRUE)
+
+/obj/item/physgun/dropped(mob/user, silent)
+	UnregisterSignal(user, COMSIG_MOB_CLICKON)
+
+	. = ..()
+	if(handled_atom)
+		release_atom()
+
 /**
- * Захват объекта по дальнему клику.
+ * Захват объекта.
  */
 /obj/item/physgun/ranged_interact_with_atom(atom/movable/target, mob/living/user, list/modifiers)
 	. = ..()
@@ -90,14 +97,10 @@
 		if(!range_check(target, user) && !handled_atom)
 			user.balloon_alert(user, "слишком далеко!")
 			return
+
 		catch_atom(target, user)
 		COOLDOWN_START(src, grab_cooldown, use_cooldown)
 		return
-
-/obj/item/physgun/dropped(mob/user, silent)
-	. = ..()
-	if(handled_atom)
-		release_atom()
 
 /obj/item/physgun/click_alt(mob/user)
 	if(handled_atom)
@@ -110,7 +113,6 @@
 
 	effects_color = chosen_color
 	personal_color = chosen_color
-
 	update_appearance()
 	return CLICK_ACTION_SUCCESS
 
@@ -125,10 +127,10 @@
 	. += span_notice("ALT + ЛКМ во время перетаскивания — повернуть объект.")
 
 /**
- * Основной процесс движения перетаскиваемого объекта за курсором.
+ * Процесс движения объекта за курсором.
  */
 /obj/item/physgun/process(seconds_per_tick)
-	if(!physgun_user)
+	if(!physgun_user || !current_grab_component || QDELETED(handled_atom))
 		release_atom()
 		return
 	if(!range_check(handled_atom, physgun_user))
@@ -145,15 +147,15 @@
 	if(handled_atom.loc == physgun_catcher.given_turf)
 		if(handled_atom.pixel_x == physgun_catcher.given_x - world.icon_size/2 && handled_atom.pixel_y == physgun_catcher.given_y - world.icon_size/2)
 			return
-		animate(handled_atom, time = 0.2 SECONDS, pixel_x = stored_pixel_x + physgun_catcher.given_x - world.icon_size/2, pixel_y = stored_pixel_y + physgun_catcher.given_y - world.icon_size/2)
+		animate(handled_atom, time = 0.2 SECONDS, pixel_x = current_grab_component.stored_pixel_x + physgun_catcher.given_x - world.icon_size/2, pixel_y = current_grab_component.stored_pixel_y + physgun_catcher.given_y - world.icon_size/2)
 		physgun_beam.redrawing()
 		return
 
-	animate(handled_atom, time = 0.2 SECONDS, pixel_x = stored_pixel_x + physgun_catcher.given_x - world.icon_size/2, pixel_y = stored_pixel_y + physgun_catcher.given_y - world.icon_size/2)
+	animate(handled_atom, time = 0.2 SECONDS, pixel_x = current_grab_component.stored_pixel_x + physgun_catcher.given_x - world.icon_size/2, pixel_y = current_grab_component.stored_pixel_y + physgun_catcher.given_y - world.icon_size/2)
 	physgun_beam.redrawing()
 
 	var/turf/turf_to_move = get_step_towards(handled_atom, physgun_catcher.given_turf)
-	handled_atom.Move(turf_to_move, get_dir(handled_atom, turf_to_move), 8)
+	handled_atom.Move(turf_to_move, get_dir(handled_atom, turf_to_move), 4)
 
 	var/pixel_x_change = 0
 	var/pixel_y_change = 0
@@ -167,7 +169,7 @@
 	else if(direction & WEST)
 		pixel_x_change = -world.icon_size/2
 
-	animate(handled_atom, time = 0.2 SECONDS, pixel_x = stored_pixel_x + pixel_x_change, pixel_y = stored_pixel_y + pixel_y_change)
+	animate(handled_atom, time = 0.1 SECONDS, pixel_x = current_grab_component.stored_pixel_x + pixel_x_change, pixel_y = current_grab_component.stored_pixel_y + pixel_y_change)
 
 /obj/item/physgun/proc/can_catch(atom/target, mob/user)
 	if(target == user)
@@ -194,7 +196,7 @@
 /obj/item/physgun/proc/range_check(atom/target, mob/user)
 	if(!isturf(user.loc))
 		return FALSE
-	if(!can_see(user, target, 4))
+	if(!can_see(user, target, maximum_distance))
 		return FALSE
 	return TRUE
 
@@ -203,8 +205,8 @@
  */
 /obj/item/physgun/proc/on_clicked(atom/source, atom/clicked_on, modifiers)
 	SIGNAL_HANDLER
+
 	if(!handled_atom || !physgun_user)
-		stack_trace("Physgun tried to run its click signal with no linked atoms or users.")
 		return
 	. = COMSIG_MOB_CANCEL_CLICKON
 
@@ -231,9 +233,13 @@
 		release_atom()
 
 /**
- * Захват объекта.
+ * Захват объекта
  */
 /obj/item/physgun/proc/catch_atom(atom/movable/target, mob/user)
+	if(SEND_SIGNAL(target, COMSIG_MOVABLE_PHYSGUN_GRABBED, src) & COMPONENT_BLOCK_PHYSGUN_GRAB)
+		playsound(user, 'modular_bandastation/fenysha_events/sounds/tools/phystools/physgun_cant_grab.ogg', 100, TRUE)
+		return
+
 	if(isliving(target))
 		var/mob/living/L = target
 		if(force_grab)
@@ -243,23 +249,15 @@
 		target.add_traits(list(TRAIT_HANDS_BLOCKED), REF(src))
 		RegisterSignal(target, COMSIG_LIVING_RESIST, PROC_REF(on_living_resist), TRUE)
 
-	// Сохраняем исходные пиксели
-	stored_pixel_x = target.pixel_x
-	stored_pixel_y = target.pixel_y
+	current_grab_component = target.AddComponent(/datum/component/physgun_grab, src)
 
-	target.movement_type = FLYING
-	target.add_filter("physgun", 3, list("type" = "outline", "color" = effects_color, "size" = 2))
-	physgun_beam = user.Beam(target, "light_beam")
+	physgun_beam = user.Beam(target, "1-full")
 	physgun_beam.beam_color = effects_color
 	physgun_catcher = user.overlay_fullscreen("physgun_effect", /atom/movable/screen/fullscreen/cursor_catcher, 0)
 	physgun_catcher.assign_to_mob(user)
 	handled_atom = target
-	handled_atom.plane = handled_atom.plane + 1
-	handled_atom.set_density(FALSE)
 	physgun_user = user
 	loop_sound.start()
-
-	RegisterSignal(user, COMSIG_MOB_CLICKON, PROC_REF(on_clicked), TRUE)
 	START_PROCESSING(SSfastprocess, src)
 
 /**
@@ -270,30 +268,17 @@
 		var/mob/living/L = handled_atom
 		if(force_grab)
 			L.SetParalyzed(0)
-		if(L.has_status_effect(/datum/status_effect/physgun_pause))
-			L.remove_status_effect(/datum/status_effect/physgun_pause)
 		handled_atom.remove_traits(list(TRAIT_HANDS_BLOCKED), REF(src))
 		UnregisterSignal(handled_atom, COMSIG_LIVING_RESIST)
 
-	if(HAS_TRAIT(handled_atom, TRAIT_PHYSGUN_PAUSE))
-		REMOVE_TRAIT(handled_atom, TRAIT_PHYSGUN_PAUSE, PHYSGUN_EFFECTS)
-
+	SEND_SIGNAL(handled_atom, COMSIG_MOVABLE_PHYSGUN_RELEASED)
 	handled_atom.movement_type = initial(handled_atom.movement_type)
 	STOP_PROCESSING(SSfastprocess, src)
-	handled_atom.remove_filter("physgun")
-	UnregisterSignal(physgun_catcher, COMSIG_CLICK)
 	physgun_catcher = null
 	physgun_user.clear_fullscreen("physgun_effect")
 
-	// Возвращаем сохранённые пиксели
-	handled_atom.pixel_x = stored_pixel_x
-	handled_atom.pixel_y = stored_pixel_y
-
-	handled_atom.anchored = initial(handled_atom.anchored)
-	handled_atom.density = initial(handled_atom.density)
-	handled_atom.plane = initial(handled_atom.plane)
-
 	qdel(physgun_beam)
+	current_grab_component = null
 	physgun_user = null
 	handled_atom = null
 	loop_sound.stop()
@@ -305,19 +290,9 @@
 	target.setDir(turn(target.dir, -90))
 
 /**
- * Заморозка объекта в воздухе.
+ * Заморозка объекта (логика теперь в компоненте).
  */
 /obj/item/physgun/proc/pause_atom(atom/movable/target)
-	if(isliving(handled_atom))
-		var/mob/living/L = target
-		if(force_grab)
-			L.apply_status_effect(/datum/status_effect/physgun_pause/admin)
-		else
-			L.apply_status_effect(/datum/status_effect/physgun_pause)
-		REMOVE_TRAIT(L, TRAIT_HANDS_BLOCKED, REF(src))
-
-	ADD_TRAIT(handled_atom, TRAIT_PHYSGUN_PAUSE, PHYSGUN_EFFECTS)
-	handled_atom.set_anchored(TRUE)
 	STOP_PROCESSING(SSfastprocess, src)
 	UnregisterSignal(physgun_catcher, list(COMSIG_CLICK, COMSIG_CLICK_ALT, COMSIG_CLICK_CTRL))
 	physgun_catcher = null
@@ -326,6 +301,8 @@
 	physgun_user = null
 	handled_atom = null
 	loop_sound.stop()
+
+	SEND_SIGNAL(target, COMSIG_MOVABLE_PHYSGUN_PAUSED)
 
 /obj/item/physgun/proc/repulse(atom/movable/target, mob/user)
 	release_atom()
@@ -363,58 +340,95 @@
 
 /datum/status_effect/physgun_pause/proc/on_resist()
 	SIGNAL_HANDLER
-
 	if(force)
 		owner.balloon_alert(owner, "не сбежать!")
 		return
-
-	if(!HAS_TRAIT(owner, TRAIT_PHYSGUN_PAUSE))
-		return
-	REMOVE_TRAIT(owner, TRAIT_PHYSGUN_PAUSE, PHYSGUN_EFFECTS)
-	owner.pixel_x = initial(owner.pixel_x)
-	owner.pixel_y = initial(owner.pixel_y)
-	owner.anchored = initial(owner.anchored)
-	owner.density = initial(owner.density)
-	owner.movement_type = initial(owner.movement_type)
+	// Полностью снимаем все эффекты физпушки через компонент
+	SEND_SIGNAL(owner, COMSIG_MOVABLE_PHYSGUN_RELEASED)
 	owner.remove_status_effect(src)
-	owner.remove_filter("physgun")
-	owner.plane = initial(owner.plane)
 
 /datum/status_effect/physgun_pause/admin
 	id = "physgun_pause_admin"
 	force = TRUE
 
-
 /datum/component/physgun_grab
 	VAR_PRIVATE/atom/movable/movable_parent = null
-	VAR_PRIVATE/atom/movable/physgun = null
+	VAR_PRIVATE/obj/item/physgun/physgun = null
 	VAR_PRIVATE/paused = FALSE
 
-	var/static/list/given_traits = list()
+	/// Исходные значения для полного восстановления
+	VAR_PRIVATE/original_density = FALSE
+	VAR_PRIVATE/original_movement_type = 0
+	VAR_PRIVATE/original_plane = 0
+	VAR_PRIVATE/original_anchored = FALSE
 
-/datum/component/physgun_grab/Initialize(obj/item/physgun/physgun)
-	if(!ismovable(parent) || !istype(physgun))
+	/// Сохранённые пиксель-смещения (для анимации в process и восстановления)
+	var/stored_pixel_x = 0
+	var/stored_pixel_y = 0
+
+/datum/component/physgun_grab/Initialize(obj/item/physgun/P)
+	if(!ismovable(parent) || !istype(P))
 		return COMPONENT_INCOMPATIBLE
+
 	src.movable_parent = parent
-	src.physgun = physgun
+	src.physgun = P
+
+	original_density = movable_parent.density
+	original_movement_type = movable_parent.movement_type
+	original_plane = movable_parent.plane
+	original_anchored = movable_parent.anchored
+	stored_pixel_x = movable_parent.pixel_x
+	stored_pixel_y = movable_parent.pixel_y
+
+	movable_parent.movement_type = FLYING
+	movable_parent.set_density(FALSE)
+	movable_parent.plane = movable_parent.plane + 1
+	parent.add_filter("physgun", 3, list("type" = "outline", "color" = P.effects_color, "size" = 2))
 
 /datum/component/physgun_grab/RegisterWithParent()
 	. = ..()
 	RegisterSignal(movable_parent, COMSIG_MOVABLE_PRE_MOVE, PROC_REF(on_pre_move))
 	RegisterSignal(movable_parent, COMSIG_MOVABLE_PHYSGUN_GRABBED, PROC_REF(on_physgun_grab))
-	RegisterSignal(movable_parent, COMSIG_MOVABLE_PHYSGUN_RELEASED, PROC_REF(on_physgun_release))
 	RegisterSignal(movable_parent, COMSIG_MOVABLE_PHYSGUN_PAUSED, PROC_REF(on_physgun_pause))
+	RegisterSignal(movable_parent, COMSIG_MOVABLE_PHYSGUN_RELEASED, PROC_REF(on_physgun_release))
 
-/datum/component/physgun_grab/UnregisterFromParent()
-	. = ..()
+/datum/component/physgun_grab/proc/on_physgun_grab()
+	SIGNAL_HANDLER
+
+
+/datum/component/physgun_grab/proc/on_physgun_pause()
+	SIGNAL_HANDLER
+	paused = TRUE
+	movable_parent.set_anchored(TRUE)
+	movable_parent.plane = original_plane
+	ADD_TRAIT(movable_parent, TRAIT_PHYSGUN_PAUSE, PHYSGUN_EFFECTS)
+
+	if(isliving(movable_parent))
+		var/mob/living/L = movable_parent
+		var/status_path = physgun.force_grab ? /datum/status_effect/physgun_pause/admin : /datum/status_effect/physgun_pause
+		L.apply_status_effect(status_path)
+		REMOVE_TRAIT(movable_parent, TRAIT_HANDS_BLOCKED, REF(physgun))
+
+/datum/component/physgun_grab/proc/on_physgun_release()
+	SIGNAL_HANDLER
+
+	movable_parent.pixel_x = stored_pixel_x
+	movable_parent.pixel_y = stored_pixel_y
+	movable_parent.movement_type = original_movement_type
+	movable_parent.set_density(original_density)
+	movable_parent.plane = original_plane
+	movable_parent.set_anchored(original_anchored)
+	movable_parent.remove_filter("physgun")
+
+	if(HAS_TRAIT(movable_parent, TRAIT_PHYSGUN_PAUSE))
+		REMOVE_TRAIT(movable_parent, TRAIT_PHYSGUN_PAUSE, PHYSGUN_EFFECTS)
+
+	qdel(src)
 
 /datum/component/physgun_grab/proc/on_pre_move(atom/movable/source)
+	SIGNAL_HANDLER
 	if(!HAS_TRAIT(source, TRAIT_PHYSGUN_PAUSE))
 		return
 	if(HAS_TRAIT(source, TRAIT_GODMODE))
 		return
 	return COMPONENT_MOVABLE_BLOCK_PRE_MOVE
-
-
-#undef TRAIT_PHYSGUN_PAUSE
-#undef PHYSGUN_EFFECTS

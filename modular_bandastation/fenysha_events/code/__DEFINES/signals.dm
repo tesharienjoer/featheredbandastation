@@ -13,7 +13,7 @@
 
 
 #define COMSIG_MOVABLE_PHYSGUN_GRABBED "movable_physgun_grabbed"
-	#define COMPONENT_BLOCK_PHYSGUN_GRAB "!no_physgun_grab"
+	#define COMPONENT_BLOCK_PHYSGUN_GRAB (1 << 1)
 
 #define COMSIG_MOVABLE_PHYSGUN_PAUSED "movable_physgun_paused"
 #define COMSIG_MOVABLE_PHYSGUN_RELEASED "movable_physgun_released"
