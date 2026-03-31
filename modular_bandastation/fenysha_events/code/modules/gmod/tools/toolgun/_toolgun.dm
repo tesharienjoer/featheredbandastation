@@ -23,6 +23,7 @@
 		/datum/toolgun_mode/spawn_mode,
 		/datum/toolgun_mode/color_mode,
 		/datum/toolgun_mode/resize_mode,
+		/datum/toolgun_mode/build_mode,
 	)
 	/// The datum of the beam
 	var/datum/beam/work_beam
@@ -54,7 +55,7 @@
 	selected_mode.use_act(user)
 
 /obj/item/toolgun/ui_state(mob/user)
-	return GLOB.hands_state
+	return GLOB.hold_or_view_state
 
 /obj/item/toolgun/ui_interact(mob/user, datum/tgui/ui)
 	if(!selected_mode)
