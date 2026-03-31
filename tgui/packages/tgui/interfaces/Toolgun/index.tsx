@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Button,
-  Collapsible,
   DmIcon,
   Input,
   Section,
@@ -31,6 +30,7 @@ type ToolgunData = {
   mode_key?: string;
   selected_type?: string;
   selected_turf?: string;
+  browse_path?: string;
   search?: string;
   has_more?: boolean;
   visible_count?: number;
@@ -57,6 +57,7 @@ export function Toolgun() {
     mode_key = 'generic',
     selected_type = '',
     selected_turf = '',
+    browse_path: backendBrowsePath = '',
     type_nodes = {},
     objects = [],
     turfs = [],
@@ -84,17 +85,15 @@ export function Toolgun() {
   const normalizedSearch = search.trim().toLowerCase();
 
   const visibleObjects = mode_key === 'build' ? turfs : objects;
+  const selectedPath = mode_key === 'build' ? selected_turf : selected_type;
+  const selectedEntry = visibleObjects.find(
+    (entry) => entry.type === selectedPath,
+  );
+
+  const currentBrowsePath =
+    backendBrowsePath || (mode_key === 'build' ? '/turf' : '/obj');
 
   const topLevelNodes = useMemo(() => Object.values(type_nodes), [type_nodes]);
-  const topLevelObjNodes = useMemo(
-    () => topLevelNodes.filter((node) => node.parent === '/obj'),
-    [topLevelNodes],
-  );
-  const topLevelTurfNodes = useMemo(
-    () => topLevelNodes.filter((node) => node.parent === '/turf'),
-    [topLevelNodes],
-  );
-
   const childrenByParent = useMemo(() => {
     const map: Record<string, ToolgunTypeNode[]> = {};
     Object.values(type_nodes).forEach((node) => {
@@ -105,99 +104,152 @@ export function Toolgun() {
     return map;
   }, [type_nodes]);
 
+  const currentChildNodes = childrenByParent[currentBrowsePath] || [];
+  const filteredChildNodes = useMemo(() => {
+    if (!normalizedSearch) {
+      return currentChildNodes;
+    }
+
+    return currentChildNodes
+      .map((node) => {
+        const nameScore = fuzzyScore(node.name.toLowerCase(), normalizedSearch);
+        const idScore = fuzzyScore(node.id.toLowerCase(), normalizedSearch);
+        const bestScore = Math.max(nameScore, idScore);
+
+        return { node, score: bestScore };
+      })
+      .filter(({ score }) => score > 0.1)
+      .sort((a, b) => b.score - a.score)
+      .map(({ node }) => node);
+  }, [currentChildNodes, normalizedSearch]);
+
+  const fuzzyScore = useCallback((text: string, pattern: string): number => {
+    if (!pattern || pattern.length === 0) return 1;
+    if (text.length === 0) return 0;
+
+    let score = 0;
+    let lastIndex = -1;
+    let consecutive = 0;
+
+    for (let i = 0; i < pattern.length; i++) {
+      const char = pattern[i];
+      const index = text.indexOf(char, lastIndex + 1);
+
+      if (index === -1) return 0;
+
+      const distance = index - lastIndex;
+      if (distance === 1) {
+        consecutive++;
+        score += 1.5 + consecutive * 0.3;
+      } else {
+        consecutive = 0;
+        score += 1 / (distance * 0.6); // штраф за пропуски
+      }
+
+      // Бонус за совпадение в начале слова
+      if (index === 0 || text[index - 1] === '/') {
+        score += 2;
+      }
+
+      lastIndex = index;
+    }
+    return score / pattern.length;
+  }, []);
+
   const fallback = <Box width="48px" height="48px" />;
 
-  /** Улучшенный рендер узла дерева (работает и для obj, и для turf) */
-  const renderNode = (
-    node: ToolgunTypeNode,
-    depth = 0,
-    isTurf = false,
-  ) => {
-    const children = childrenByParent[node.id] || [];
-    const isSelected = isTurf
-      ? selected_turf === node.id
-      : selected_type === node.id;
+  const gridStyle = {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, 1fr)',
+    gap: '12px',
+  };
 
-    const onClick = () =>
-      act(isTurf ? 'select_turf' : 'select_type', { path: node.id });
-
-    const title = (
-      <Button
-        fluid
-        color={isSelected ? 'grey' : 'transparent'}
-        onClick={onClick}
-      >
-        {node.name}
-      </Button>
-    );
-
-    if (!children.length) {
+  /** Большой превью выбранного объекта */
+  const renderSelectedPreview = () => {
+    if (!selectedEntry) {
       return (
-        <Box key={node.id} ml={depth ? 1 : 0}>
-          {title}
-        </Box>
+        <Section title="Выбранный объект" mb={2}>
+          <Box
+            textAlign="center"
+            color="#aaaaaa"
+            py={6}
+            backgroundColor="#444444"
+            style={{ borderRadius: '4px' }}
+          >
+            Ничего не выбрано
+          </Box>
+        </Section>
       );
     }
 
     return (
-      <Box key={node.id} ml={depth ? 1 : 0}>
-        <Collapsible title={title} open={depth < 2}>
-          {children.map((child) => renderNode(child, depth + 1, isTurf))}
-        </Collapsible>
-      </Box>
+      <Section title="Выбранный объект" mb={2}>
+        <Stack align="center">
+          <Stack.Item grow>
+            <DmIcon
+              position="center"
+              icon={selectedEntry.icon}
+              icon_state={selectedEntry.icon_state}
+              width="128px"
+              fallback={fallback}
+            />
+            <Box minWidth={0}>
+              <Box
+                fontWeight="bold"
+                fontSize="1.3em"
+                lineHeight={1.2}
+                overflow="hidden"
+                style={{ whiteSpace: 'nowrap' }}
+              >
+                {selectedEntry.name ||
+                  selectedEntry.type.split('/').pop() ||
+                  selectedEntry.type}
+              </Box>
+            </Box>
+          </Stack.Item>
+        </Stack>
+      </Section>
     );
   };
 
-  /** Компактная карточка объекта/турфа в стиле Garry’s Mod (клик по всей карточке = выбор) */
-  const renderObjectItem = (
-    entry: ToolgunObject,
-    onSelect: (path: string) => void,
-  ) => (
-    <Box
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        padding: '10px',
-        backgroundColor: '#383838',
-        border: '1px solid #4f4f4f',
-        borderRadius: '4px',
-        cursor: 'pointer',
-        transition: 'background-color 0.1s',
-      }}
-      onClick={() => onSelect(entry.type)}
-    >
-      <DmIcon
-        icon={entry.icon}
-        icon_state={entry.icon_state}
-        width="48px"
-        fallback={fallback}
-      />
-      <Box style={{ flexGrow: 1 }} minWidth={0}>
-        <Box fontWeight="bold" overflow="hidden" style={{ whiteSpace: 'nowrap' }}>
-          {entry.name || entry.type}
-        </Box>
-        <Box
-          color="#a0a0a0"
-          fontSize="0.85em"
-          mt={0.5}
-          overflow="hidden"
-          style={{ whiteSpace: 'nowrap' }}
-        >
-          {entry.type}
-        </Box>
-      </Box>
+  const renderObjectsGrid = (onSelect: (path: string) => void) => (
+    <Box style={gridStyle}>
+      {visibleObjects.map((entry) => {
+        const isSelected = selectedPath === entry.type;
+        return (
+          <Box
+            key={entry.type}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '12px',
+              backgroundColor: isSelected ? '#666666' : '#444444',
+              border: `1px solid ${isSelected ? '#999999' : '#555555'}`,
+              borderRadius: '4px',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+            onClick={() => onSelect(entry.type)}
+          >
+            <Button
+              tooltip={entry.name || entry.type.split('/').pop() || entry.type}
+            >
+              <DmIcon
+                icon={entry.icon}
+                icon_state={entry.icon_state}
+                width="48px"
+                fallback={fallback}
+              />
+            </Button>
+          </Box>
+        );
+      })}
     </Box>
   );
 
-  const gridStyle = {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-    gap: '8px',
-  };
-
   const renderCustomizationSettings = () => (
-    <Section title="Настройки спавна / строительства" fill>
+    <Section title="Настройки" scrollable>
       <Stack vertical>
         <Stack.Item>
           <Button.Checkbox
@@ -247,12 +299,74 @@ export function Toolgun() {
     </Section>
   );
 
+  /** Левая панель — навигация по папкам (перемещение по папкам) */
+  const renderFolderBrowser = (isTurf: boolean) => {
+    const rootPath = isTurf ? '/turf' : '/obj';
+    const title = isTurf ? 'Подтипы турфов' : 'Подтипы обьектов';
+    const onRootClick = () => act('browse_to', { path: rootPath });
+
+    return (
+      <Section fill scrollable title={title}>
+        {/* Кнопка «Назад» */}
+        {currentBrowsePath !== rootPath && (
+          <Button
+            fluid
+            icon="arrow-up"
+            mb={1}
+            onClick={() => {
+              const lastSlash = currentBrowsePath.lastIndexOf('/');
+              const parentPath =
+                lastSlash > 0
+                  ? currentBrowsePath.slice(0, lastSlash)
+                  : rootPath;
+              act('browse_to', { path: parentPath });
+            }}
+          >
+            .. Назад
+          </Button>
+        )}
+
+        {/* Кнопка корня */}
+        <Box mb={1}>
+          <Button
+            fluid
+            color={currentBrowsePath === rootPath ? 'grey' : 'transparent'}
+            onClick={onRootClick}
+          >
+            {isTurf ? 'turf (корень)' : 'obj (корень)'}
+          </Button>
+        </Box>
+
+        {/* Список подпапок текущего уровня */}
+        {filteredChildNodes.map((node) => (
+          <Button
+            key={node.id}
+            fluid
+            mb={0.5}
+            color="transparent"
+            onClick={() => act('browse_to', { path: node.id })}
+          >
+            {node.name}
+          </Button>
+        ))}
+
+        {filteredChildNodes.length === 0 && (
+          <Box color="#888888" textAlign="center" py={4}>
+            {normalizedSearch
+              ? 'Подтипы не обнаружены'
+              : 'У этого типа - нед подтипов'}
+          </Box>
+        )}
+      </Section>
+    );
+  };
+
   const renderSpawnMode = () => (
     <>
       <Stack.Item>
         <Input
           fluid
-          placeholder="Поиск по имени или типу..."
+          placeholder="Поиск по имени или типу (внутри текущего подтипа)..."
           value={search}
           onChange={(value) => {
             setSearch(value);
@@ -262,23 +376,10 @@ export function Toolgun() {
       </Stack.Item>
       <Stack.Item grow>
         <Stack fill>
-          {/* Левая панель — дерево типов (минималистично) */}
-          <Stack.Item basis="35%">
-            <Section fill scrollable title="Дерево типов">
-              <Box mb={1}>
-                <Button
-                  fluid
-                  color={selected_type === '/obj' ? 'grey' : 'transparent'}
-                  onClick={() => act('select_type', { path: '/obj' })}
-                >
-                  obj
-                </Button>
-              </Box>
-              {topLevelObjNodes.map((node) => renderNode(node, 0, false))}
-            </Section>
-          </Stack.Item>
+          {/* Левая панель — папки */}
+          <Stack.Item basis="280px">{renderFolderBrowser(false)}</Stack.Item>
 
-          {/* Центральная панель — сетка объектов (как в Garry’s Mod) */}
+          {/* Центральная панель — грид объектов (4 колонки) */}
           <Stack.Item grow>
             <Section
               fill
@@ -290,13 +391,7 @@ export function Toolgun() {
                 </Button>
               }
             >
-              <Box style={gridStyle}>
-                {visibleObjects.map((entry) =>
-                  renderObjectItem(entry, (path) =>
-                    act('select_type', { path }),
-                  ),
-                )}
-              </Box>
+              {renderObjectsGrid((path) => act('select_type', { path }))}
 
               {!normalizedSearch && has_more && (
                 <Button
@@ -311,8 +406,9 @@ export function Toolgun() {
             </Section>
           </Stack.Item>
 
-          {/* Правая панель — настройки */}
-          <Stack.Item basis="30%">
+          {/* Правая панель */}
+          <Stack.Item basis="280px">
+            {renderSelectedPreview()}
             {renderCustomizationSettings()}
           </Stack.Item>
         </Stack>
@@ -325,7 +421,7 @@ export function Toolgun() {
       <Stack.Item>
         <Input
           fluid
-          placeholder="Поиск по имени или типу поверхности..."
+          placeholder="Поиск по имени или типу поверхности (внутри текущей папки)..."
           value={search}
           onChange={(value) => {
             setSearch(value);
@@ -335,23 +431,10 @@ export function Toolgun() {
       </Stack.Item>
       <Stack.Item grow>
         <Stack fill>
-          {/* Левая панель — дерево турфов (теперь тоже полноценное иерархическое) */}
-          <Stack.Item basis="35%">
-            <Section fill scrollable title="Дерево поверхностей">
-              <Box mb={1}>
-                <Button
-                  fluid
-                  color={selected_turf === '/turf' ? 'grey' : 'transparent'}
-                  onClick={() => act('select_turf', { path: '/turf' })}
-                >
-                  turf
-                </Button>
-              </Box>
-              {topLevelTurfNodes.map((node) => renderNode(node, 0, true))}
-            </Section>
-          </Stack.Item>
+          {/* Левая панель — папки */}
+          <Stack.Item basis="280px">{renderFolderBrowser(true)}</Stack.Item>
 
-          {/* Центральная панель — сетка поверхностей */}
+          {/* Центральная панель — грид поверхностей */}
           <Stack.Item grow>
             <Section
               fill
@@ -363,13 +446,7 @@ export function Toolgun() {
                 </Button>
               }
             >
-              <Box style={gridStyle}>
-                {visibleObjects.map((entry) =>
-                  renderObjectItem(entry, (path) =>
-                    act('select_turf', { path }),
-                  ),
-                )}
-              </Box>
+              {renderObjectsGrid((path) => act('select_turf', { path }))}
 
               {!normalizedSearch && has_more && (
                 <Button
@@ -384,15 +461,19 @@ export function Toolgun() {
             </Section>
           </Stack.Item>
 
-          {/* Правая панель — режимы строительства + настройки */}
-          <Stack.Item basis="30%">
-            <Section title="Режим строительства">
+          {/* Правая панель */}
+          <Stack.Item basis="280px">
+            {renderSelectedPreview()}
+
+            <Section title="Режим строительства" mb={2}>
               <Stack vertical>
                 <Stack.Item>
                   <Button
                     fluid
-                    selected={build_action === 'brush'}
-                    onClick={() => act('set_build_action', { build_action: 'brush' })}
+                    color={build_action === 'brush' ? 'grey' : 'transparent'}
+                    onClick={() =>
+                      act('set_build_action', { build_action: 'brush' })
+                    }
                   >
                     Кисть
                   </Button>
@@ -400,8 +481,10 @@ export function Toolgun() {
                 <Stack.Item>
                   <Button
                     fluid
-                    selected={build_action === 'fill'}
-                    onClick={() => act('set_build_action', { build_action: 'fill' })}
+                    color={build_action === 'fill' ? 'grey' : 'transparent'}
+                    onClick={() =>
+                      act('set_build_action', { build_action: 'fill' })
+                    }
                   >
                     Заливка
                   </Button>
@@ -409,8 +492,10 @@ export function Toolgun() {
                 <Stack.Item>
                   <Button
                     fluid
-                    selected={build_action === 'wand'}
-                    onClick={() => act('set_build_action', { build_action: 'wand' })}
+                    color={build_action === 'wand' ? 'grey' : 'transparent'}
+                    onClick={() =>
+                      act('set_build_action', { build_action: 'wand' })
+                    }
                   >
                     Палочка
                   </Button>
@@ -428,7 +513,9 @@ export function Toolgun() {
                         <Input
                           fluid
                           value={String(wand_range)}
-                          onChange={(value) => act('set_wand_range', { range: value })}
+                          onChange={(value) =>
+                            act('set_wand_range', { range: value })
+                          }
                         />
                       </Stack.Item>
                     </Stack>
@@ -503,26 +590,17 @@ export function Toolgun() {
           <Stack.Item>
             <Stack>
               <Stack.Item grow>
-                <Button
-                  fluid
-                  onClick={() => act('set_scale', { scale: 0.5 })}
-                >
+                <Button fluid onClick={() => act('set_scale', { scale: 0.5 })}>
                   0.5×
                 </Button>
               </Stack.Item>
               <Stack.Item grow>
-                <Button
-                  fluid
-                  onClick={() => act('set_scale', { scale: 1 })}
-                >
+                <Button fluid onClick={() => act('set_scale', { scale: 1 })}>
                   1×
                 </Button>
               </Stack.Item>
               <Stack.Item grow>
-                <Button
-                  fluid
-                  onClick={() => act('set_scale', { scale: 2 })}
-                >
+                <Button fluid onClick={() => act('set_scale', { scale: 2 })}>
                   2×
                 </Button>
               </Stack.Item>
@@ -534,26 +612,19 @@ export function Toolgun() {
   );
 
   return (
-    <Window
-      width={1120}
-      height={640}
-      title={mode_name || 'Toolgun'}
-      // Убрали «hackerman» — теперь чистый минималистичный серый стиль под Garry’s Mod
-    >
+    <Window width={1120} height={640} title={mode_name || 'Toolgun'}>
       <Window.Content
         style={{
-          background: '#252525', // тёмно-серый фон в духе Garry’s Mod
+          background: '#333333',
         }}
       >
         <Stack vertical fill>
-          {/* Заголовок режима */}
           <Stack.Item>
             <Section title={mode_name || 'Toolgun'}>
               <Box color="#d2d2d2">{mode_desc}</Box>
             </Section>
           </Stack.Item>
 
-          {/* Рендер в зависимости от режима */}
           {mode_key === 'spawn' && renderSpawnMode()}
           {mode_key === 'build' && renderBuildMode()}
           {mode_key === 'color' && renderColorMode()}
