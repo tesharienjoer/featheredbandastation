@@ -93,10 +93,10 @@
 	for(var/list/object_entry as anything in cached_objects)
 		var/object_type = object_entry["type"]
 
-		// Только прямые дети текущей папки
-		var/immediate_parent = copytext(object_type, 1, findlasttext(object_type, "/"))
-		if(immediate_parent != current_browse_path)
-			continue
+		if(!filter_by_search)
+			var/immediate_parent = copytext(object_type, 1, findlasttext(object_type, "/"))
+			if(immediate_parent != current_browse_path)
+				continue
 
 		if(filter_by_search)
 			var/object_name = lowertext("[object_entry["name"]]")
@@ -215,7 +215,7 @@
 	var/selected_turf_path = "/turf"
 	var/selected_turf = /turf/open/floor/plating
 	var/current_search = ""
-	var/current_browse_path = "/turf"        // ← Текущая открытая папка для турфов
+	var/current_browse_path = "/turf"
 	var/loaded_limit = 80
 	var/page_size = 80
 	var/use_custom_color = FALSE
@@ -257,10 +257,10 @@
 	for(var/list/turf_entry as anything in cached_turf_entries)
 		var/turf_type = turf_entry["type"]
 
-		// Только прямые дети текущей папки
-		var/immediate_parent = copytext(turf_type, 1, findlasttext(turf_type, "/"))
-		if(immediate_parent != current_browse_path)
-			continue
+		if(!filter_by_search)
+			var/immediate_parent = copytext(turf_type, 1, findlasttext(turf_type, "/"))
+			if(immediate_parent != current_browse_path)
+				continue
 
 		if(filter_by_search)
 			var/turf_name = lowertext("[turf_entry["name"]]")

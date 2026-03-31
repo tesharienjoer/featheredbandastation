@@ -78,11 +78,28 @@ export function Toolgun() {
 
   const [search, setSearch] = useState(backendSearch);
 
+  const [debouncedSearch, setDebouncedSearch] = useState(backendSearch);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    if (debouncedSearch !== backendSearch) {
+      act('set_search', { search: debouncedSearch });
+    }
+  }, [debouncedSearch, backendSearch, act]);
+
   useEffect(() => {
     setSearch(backendSearch);
+    setDebouncedSearch(backendSearch);
   }, [backendSearch, mode_key]);
 
-  const normalizedSearch = search.trim().toLowerCase();
+  const normalizedSearch = debouncedSearch.trim().toLowerCase();
 
   const visibleObjects = mode_key === 'build' ? turfs : objects;
   const selectedPath = mode_key === 'build' ? selected_turf : selected_type;
@@ -179,17 +196,18 @@ export function Toolgun() {
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
-              padding: '6px',
+              gap: '1em',
+              padding: '2px',
               backgroundColor: isSelected ? '#666666' : '#444444',
               border: `1px solid ${isSelected ? '#999999' : '#555555'}`,
-              borderRadius: '3px',
+              borderRadius: '2px',
               cursor: 'pointer',
             }}
           >
             <Button
               tooltip={entry.name || entry.type.split('/').pop() || entry.type}
               onDoubleClick={() => onSelect(entry.type)}
+              backgroundColor="transparent"
             >
               <DmIcon
                 icon={entry.icon}
@@ -256,20 +274,35 @@ export function Toolgun() {
     </Section>
   );
 
-  /** Левая панель — навигация по папкам (перемещение по папкам) */
+  /** Левая панель — навигация по папкам */
   const renderFolderBrowser = (isTurf: boolean) => {
     const rootPath = isTurf ? '/turf' : '/obj';
-    const title = isTurf ? 'Подтипы турфов' : 'Подтипы обьектов';
+    const title = isTurf ? 'Подтипы турфов' : 'Подтипы объектов';
     const onRootClick = () => act('browse_to', { path: rootPath });
+
+    let displayChildNodes = currentChildNodes;
+    if (normalizedSearch) {
+      displayChildNodes = currentChildNodes.filter(
+        (node) =>
+          node.name.toLowerCase().includes(normalizedSearch) ||
+          node.id.toLowerCase().includes(normalizedSearch),
+      );
+    }
+
+    const folderChildNodes = displayChildNodes.filter((node) => {
+      return !!(
+        childrenByParent[node.id] && childrenByParent[node.id].length > 0
+      );
+    });
 
     return (
       <Section fill scrollable title={title}>
-        {/* Кнопка «Назад» */}
         {currentBrowsePath !== rootPath && (
           <Button
             fluid
             icon="arrow-up"
             mb={1}
+            backgroundColor="transparent"
             onClick={() => {
               const lastSlash = currentBrowsePath.lastIndexOf('/');
               const parentPath =
@@ -283,7 +316,6 @@ export function Toolgun() {
           </Button>
         )}
 
-        {/* Кнопка корня */}
         <Box mb={1}>
           <Button
             fluid
@@ -294,8 +326,7 @@ export function Toolgun() {
           </Button>
         </Box>
 
-        {/* Список подпапок текущего уровня */}
-        {filteredChildNodes.map((node) => (
+        {folderChildNodes.map((node) => (
           <Button
             key={node.id}
             fluid
@@ -307,11 +338,11 @@ export function Toolgun() {
           </Button>
         ))}
 
-        {filteredChildNodes.length === 0 && (
+        {folderChildNodes.length === 0 && (
           <Box color="#888888" textAlign="center" py={4}>
             {normalizedSearch
               ? 'Подтипы не обнаружены'
-              : 'У этого типа - нед подтипов'}
+              : 'У этого типа нет подтипов'}
           </Box>
         )}
       </Section>
@@ -323,20 +354,15 @@ export function Toolgun() {
       <Stack.Item>
         <Input
           fluid
-          placeholder="Поиск по имени или типу (внутри текущего подтипа)..."
+          placeholder="Поиск по всем типам и именам..."
           value={search}
-          onChange={(value) => {
-            setSearch(value);
-            act('set_search', { search: value });
-          }}
+          onChange={(value) => setSearch(value)}
         />
       </Stack.Item>
       <Stack.Item grow>
         <Stack fill>
-          {/* Левая панель — папки */}
           <Stack.Item basis="280px">{renderFolderBrowser(false)}</Stack.Item>
 
-          {/* Центральная панель — грид объектов (4 колонки) */}
           <Stack.Item grow>
             <Section
               fill
@@ -363,7 +389,6 @@ export function Toolgun() {
             </Section>
           </Stack.Item>
 
-          {/* Правая панель */}
           <Stack.Item basis="280px">
             {renderSelectedPreview()}
             {renderCustomizationSettings()}
@@ -378,20 +403,15 @@ export function Toolgun() {
       <Stack.Item>
         <Input
           fluid
-          placeholder="Поиск по имени или типу поверхности (внутри текущей папки)..."
+          placeholder="Поиск по всем типам и именам турфов..."
           value={search}
-          onChange={(value) => {
-            setSearch(value);
-            act('set_search', { search: value });
-          }}
+          onChange={(value) => setSearch(value)}
         />
       </Stack.Item>
       <Stack.Item grow>
         <Stack fill>
-          {/* Левая панель — папки */}
           <Stack.Item basis="280px">{renderFolderBrowser(true)}</Stack.Item>
 
-          {/* Центральная панель — грид поверхностей */}
           <Stack.Item grow>
             <Section
               fill
@@ -418,7 +438,6 @@ export function Toolgun() {
             </Section>
           </Stack.Item>
 
-          {/* Правая панель */}
           <Stack.Item basis="280px">
             {renderSelectedPreview()}
 
