@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Button,
@@ -105,63 +105,20 @@ export function Toolgun() {
   }, [type_nodes]);
 
   const currentChildNodes = childrenByParent[currentBrowsePath] || [];
-  const filteredChildNodes = useMemo(() => {
-    if (!normalizedSearch) {
-      return currentChildNodes;
-    }
-
-    return currentChildNodes
-      .map((node) => {
-        const nameScore = fuzzyScore(node.name.toLowerCase(), normalizedSearch);
-        const idScore = fuzzyScore(node.id.toLowerCase(), normalizedSearch);
-        const bestScore = Math.max(nameScore, idScore);
-
-        return { node, score: bestScore };
-      })
-      .filter(({ score }) => score > 0.1)
-      .sort((a, b) => b.score - a.score)
-      .map(({ node }) => node);
-  }, [currentChildNodes, normalizedSearch]);
-
-  const fuzzyScore = useCallback((text: string, pattern: string): number => {
-    if (!pattern || pattern.length === 0) return 1;
-    if (text.length === 0) return 0;
-
-    let score = 0;
-    let lastIndex = -1;
-    let consecutive = 0;
-
-    for (let i = 0; i < pattern.length; i++) {
-      const char = pattern[i];
-      const index = text.indexOf(char, lastIndex + 1);
-
-      if (index === -1) return 0;
-
-      const distance = index - lastIndex;
-      if (distance === 1) {
-        consecutive++;
-        score += 1.5 + consecutive * 0.3;
-      } else {
-        consecutive = 0;
-        score += 1 / (distance * 0.6); // штраф за пропуски
-      }
-
-      // Бонус за совпадение в начале слова
-      if (index === 0 || text[index - 1] === '/') {
-        score += 2;
-      }
-
-      lastIndex = index;
-    }
-    return score / pattern.length;
-  }, []);
+  const filteredChildNodes = normalizedSearch
+    ? currentChildNodes.filter(
+        (node) =>
+          node.name.toLowerCase().includes(normalizedSearch) ||
+          node.id.toLowerCase().includes(normalizedSearch),
+      )
+    : currentChildNodes;
 
   const fallback = <Box width="48px" height="48px" />;
 
   const gridStyle = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(4, 1fr)',
-    gap: '12px',
+    gridTemplateColumns: 'repeat(5, 1fr)',
+    gap: '8px',
   };
 
   /** Большой превью выбранного объекта */
@@ -222,24 +179,24 @@ export function Toolgun() {
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '12px',
-              padding: '12px',
+              gap: '6px',
+              padding: '6px',
               backgroundColor: isSelected ? '#666666' : '#444444',
               border: `1px solid ${isSelected ? '#999999' : '#555555'}`,
-              borderRadius: '4px',
+              borderRadius: '3px',
               cursor: 'pointer',
-              transition: 'all 0.15s ease',
             }}
-            onClick={() => onSelect(entry.type)}
           >
             <Button
               tooltip={entry.name || entry.type.split('/').pop() || entry.type}
+              onDoubleClick={() => onSelect(entry.type)}
             >
               <DmIcon
                 icon={entry.icon}
                 icon_state={entry.icon_state}
                 width="48px"
                 fallback={fallback}
+                backgroundColor={isSelected ? '#666666' : '#444444'}
               />
             </Button>
           </Box>
