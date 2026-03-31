@@ -2,7 +2,7 @@ PROCESSING_SUBSYSTEM_DEF(moving_turfs)
 	name = "Moving turfs"
 	wait = 0.1 SECONDS
 	stat_tag = "MT"
-	flags = SS_NO_INIT
+	ss_flags = SS_NO_INIT
 
 	var/list/all_simulated_turfs = list()
 	var/list/to_process = list()

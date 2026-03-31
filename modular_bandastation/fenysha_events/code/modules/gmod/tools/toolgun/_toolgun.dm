@@ -20,17 +20,24 @@
 	var/datum/toolgun_mode/selected_mode
 	/// Available modes
 	var/list/datum/toolgun_mode/available_modes = list(
-		/datum/toolgun_mode/spawn_mode,
+		/datum/toolgun_mode/spawning/objects,
 		/datum/toolgun_mode/color_mode,
 		/datum/toolgun_mode/resize_mode,
-		/datum/toolgun_mode/build_mode,
+		/datum/toolgun_mode/spawning/build_mode,
+		/datum/toolgun_mode/spawning/mobs,
 	)
 	/// The datum of the beam
 	var/datum/beam/work_beam
+	COOLDOWN_DECLARE(sound_cd)
+
+/obj/item/toolgun/Initialize(mapload)
+	. = ..()
+	if(length(available_modes))
+		select_mode_by_path(available_modes[1], null, TRUE)
 
 /obj/item/toolgun/examine(mob/user)
 	. = ..()
-	. += span_notice("Use ALT + LMB on the device to choose the mode.")
+	. += span_notice("Use attack self to open toolgun UI and switch modes from the top panel.")
 	if(!selected_mode)
 		. += span_notice("No selected mode!")
 		return
@@ -44,16 +51,7 @@
 					даже не пытайся искать тут что-нибудь. Ты меня слышишь? Даже не пытайся. Ты все равно ничего не найдешь.")
 
 /obj/item/toolgun/click_alt(mob/user)
-	. = ..()
-	if(selected_mode)
-		qdel(selected_mode)
-	var/datum/toolgun_mode/mode_to_select = tgui_input_list(user, "Select work mode:", "toolgun mode", available_modes)
-	if(!mode_to_select)
-		return
-	selected_mode = new mode_to_select
-	selected_mode.our_tool = src
-	selected_mode.on_selected(user)
-	playsound(user, 'modular_bandastation/fenysha_events/sounds/tools/phystools/toolgun_select.ogg', 100, TRUE)
+	return ..()
 
 /obj/item/toolgun/attack_self(mob/user)
 	. = ..()
@@ -62,12 +60,14 @@
 	selected_mode.use_act(user)
 
 /obj/item/toolgun/ui_state(mob/user)
-	return GLOB.hold_or_view_state
+	return GLOB.hands_state
 
 /obj/item/toolgun/ui_interact(mob/user, datum/tgui/ui)
 	if(!selected_mode)
-		balloon_alert(user, "mode is not selected")
-		return
+		if(!length(available_modes))
+			balloon_alert(user, "mode is not selected")
+			return
+		select_mode_by_path(available_modes[1], user, TRUE)
 	selected_mode.ui_interact(user, ui)
 
 /obj/item/toolgun/ui_static_data(mob/user)
@@ -78,37 +78,83 @@
 /obj/item/toolgun/ui_data(mob/user)
 	if(!selected_mode)
 		return list()
-	return selected_mode.ui_data(user)
+	var/list/mode_data = selected_mode.ui_data(user)
+	mode_data["available_modes"] = get_mode_entries()
+	mode_data["selected_mode_key"] = selected_mode.mode_key
+	return mode_data
 
 /obj/item/toolgun/ui_act(action, list/params, datum/tgui/ui, datum/ui_state/state)
 	. = ..()
 	if(.)
 		return
+	if(COOLDOWN_FINISHED(src, sound_cd))
+		playsound(src, 'modular_bandastation/fenysha_events/sounds/tools/phystools/toolgun_select.ogg', 20)
+		COOLDOWN_START(src, sound_cd, 1 SECONDS)
+
+	if(action == "select_mode")
+		var/selected_key = trimtext(params["mode_key"])
+		if(!length(selected_key))
+			return TRUE
+		for(var/datum/toolgun_mode/mode_path in available_modes)
+			if(initial(mode_path.mode_key) != selected_key)
+				continue
+			select_mode_by_path(mode_path, usr)
+			return TRUE
+		return TRUE
 	if(!selected_mode)
 		return TRUE
 	return selected_mode.ui_act(action, params, ui, state)
 
 /obj/item/toolgun/ranged_interact_with_atom(atom/target, mob/user, list/modifiers)
-	. = ..()
 	if(!selected_mode)
 		return
 	if(!selected_mode.main_act(target, user))
 		playsound(user, 'modular_bandastation/fenysha_events/sounds/tools/phystools/toolgun_error.ogg', 100, TRUE)
-		return
+		return ITEM_INTERACT_SUCCESS
 	do_work_effect(target, user)
 	playsound(user, 'modular_bandastation/fenysha_events/sounds/tools/phystools/toolgun_shot1.ogg', 100, TRUE)
+	return ITEM_INTERACT_SUCCESS
 
 /obj/item/toolgun/ranged_interact_with_atom_secondary(atom/target, mob/user, proximity_flag, list/modifiers)
-	. = ..()
 	if(!selected_mode)
 		return
 	if(!selected_mode.secondnary_act(target, user))
 		playsound(user, 'modular_bandastation/fenysha_events/sounds/tools/phystools/toolgun_error.ogg', 100, TRUE)
-		return
+		return ITEM_INTERACT_SUCCESS
 	do_work_effect(target, user)
 	playsound(user, 'modular_bandastation/fenysha_events/sounds/tools/phystools/toolgun_shot1.ogg', 100, TRUE)
+	return ITEM_INTERACT_SUCCESS
+
+/obj/item/toolgun/interact_with_atom(atom/interacting_with, mob/living/user, list/modifiers)
+	return ranged_interact_with_atom(interacting_with, user, modifiers)
+
+/obj/item/toolgun/interact_with_atom_secondary(atom/interacting_with, mob/living/user, list/modifiers)
+	return ranged_interact_with_atom_secondary(interacting_with, user, FALSE, modifiers)
 
 /obj/item/toolgun/proc/do_work_effect(atom/target, mob/user)
 	if(!target)
 		return
 	work_beam = user.Beam(target, "light_beam", time = 3)
+
+/obj/item/toolgun/proc/select_mode_by_path(mode_path, mob/user, silent = FALSE)
+	if(!mode_path)
+		return FALSE
+	if(selected_mode)
+		qdel(selected_mode)
+	selected_mode = new mode_path
+	selected_mode.our_tool = src
+	if(user)
+		selected_mode.on_selected(user)
+	if(!silent && user)
+		playsound(user, 'modular_bandastation/fenysha_events/sounds/tools/phystools/toolgun_select.ogg', 100, TRUE)
+	return TRUE
+
+/obj/item/toolgun/proc/get_mode_entries()
+	var/list/entries = list()
+	for(var/path in available_modes)
+		var/datum/toolgun_mode/mode_path = path
+		entries += list(list(
+			"mode_key" = "[initial(mode_path.mode_key)]",
+			"name" = "[initial(mode_path.name)]",
+		))
+	return entries

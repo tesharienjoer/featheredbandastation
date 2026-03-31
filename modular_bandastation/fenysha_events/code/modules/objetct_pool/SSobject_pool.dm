@@ -9,7 +9,7 @@
 */
 SUBSYSTEM_DEF(object_pool)
 	name = "Object Pool"
-	flags = SS_NO_FIRE | SS_INIT_NO_NEED
+	ss_flags = SS_NO_FIRE | SS_INIT_NO_NEED
 
 	/// type => list of pooled instances (stack: pop from end)
 	var/list/pools = list()

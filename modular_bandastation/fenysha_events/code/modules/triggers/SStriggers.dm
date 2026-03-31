@@ -1,6 +1,6 @@
 SUBSYSTEM_DEF(triggers)
 	name = "Action triggers"
-	flags = SS_KEEP_TIMING
+	ss_flags = SS_KEEP_TIMING
 	wait = 1 SECONDS
 
 	var/list/key_to_listeners = list()          // "key" -> list(/datum/component/listener)
