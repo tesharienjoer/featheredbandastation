@@ -28,7 +28,10 @@
 	)
 	/// The datum of the beam
 	var/datum/beam/work_beam
+	var/use_cooldown = 5 SECONDS
+
 	COOLDOWN_DECLARE(sound_cd)
+	COOLDOWN_DECLARE(work_cd)
 
 /obj/item/toolgun/Initialize(mapload)
 	. = ..()
@@ -110,6 +113,9 @@
 	return selected_mode.ui_act(action, params, ui, state)
 
 /obj/item/toolgun/ranged_interact_with_atom(atom/target, mob/user, list/modifiers)
+	if(!COOLDOWN_FINISHED(src, work_cd))
+		return ITEM_INTERACT_SUCCESS
+
 	if(!selected_mode)
 		return
 	if(!selected_mode.main_act(target, user))
@@ -117,9 +123,13 @@
 		return ITEM_INTERACT_SUCCESS
 	do_work_effect(target, user)
 	playsound(user, 'modular_bandastation/fenysha_events/sounds/tools/phystools/toolgun_shot1.ogg', 100, TRUE)
+	COOLDOWN_START(src, work_cd, use_cooldown)
 	return ITEM_INTERACT_SUCCESS
 
 /obj/item/toolgun/ranged_interact_with_atom_secondary(atom/target, mob/user, proximity_flag, list/modifiers)
+	if(!COOLDOWN_FINISHED(src, work_cd))
+		return ITEM_INTERACT_SUCCESS
+
 	if(!selected_mode)
 		return
 	if(!selected_mode.secondnary_act(target, user))
@@ -127,6 +137,8 @@
 		return ITEM_INTERACT_SUCCESS
 	do_work_effect(target, user)
 	playsound(user, 'modular_bandastation/fenysha_events/sounds/tools/phystools/toolgun_shot1.ogg', 100, TRUE)
+
+	COOLDOWN_START(src, work_cd, use_cooldown)
 	return ITEM_INTERACT_SUCCESS
 
 /obj/item/toolgun/interact_with_atom(atom/interacting_with, mob/living/user, list/modifiers)

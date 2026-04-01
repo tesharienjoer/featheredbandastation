@@ -255,7 +255,7 @@
 		if(length(current_search) < 3)
 			return TRUE
 
-		COOLDOWN_START(src, seach_cd, 1.5 SECONDS)
+		COOLDOWN_START(src, seach_cd, 4 SECONDS)
 		loaded_limit = page_size
 		return TRUE
 
