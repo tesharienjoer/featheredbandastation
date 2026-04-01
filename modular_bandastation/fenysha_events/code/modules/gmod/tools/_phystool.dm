@@ -61,7 +61,7 @@
 	. = ..()
 	if(!isinhands)
 		return
-	var/mutable_appearance/overlay = emissive_appearance(icon_file, "gravitygun_overlay", src)
+	var/mutable_appearance/overlay = mutable_appearance(icon_file, "gravitygun_overlay", src)
 	overlay.color = personal_color ? personal_color : initial(personal_color)
 	. += overlay
 
@@ -313,9 +313,11 @@
 /obj/item/physgun/advanced
 	advanced = TRUE
 	use_cooldown = 1 SECONDS
+	personal_color = COLOR_FRENCH_BLUE
 
 /obj/item/physgun/advanced/admin
 	force_grab = TRUE
+	personal_color = COLOR_RED_GRAY
 
 /datum/looping_sound/gravgen/kinesis/phys_gun
 	mid_sounds = list('modular_bandastation/fenysha_events/sounds/tools/phystools/physgun_hold_loop.ogg' = 1)

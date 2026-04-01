@@ -162,3 +162,8 @@
 			"name" = "[initial(mode_path.name)]",
 		))
 	return entries
+
+
+/obj/item/toolgun/spawn_only
+	name = "Туллган - ослабленный"
+	available_modes = list(/datum/toolgun_mode/spawning/objects)

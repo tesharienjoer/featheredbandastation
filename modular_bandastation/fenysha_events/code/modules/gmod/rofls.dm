@@ -153,6 +153,27 @@ GLOBAL_LIST_INIT(streamers, list(
 		SEND_SOUND(new_voter, sound('modular_bandastation/fenysha_events/sounds/effects/endvote.ogg'))
 
 
+ADMIN_VERB(give_everyonetoolgun, R_ADMIN, "Выдать всем туллганы", "Выдает всем игрокам туллганы и на выбор цель на остаться в живых", "Event.Construct")
+	if(!check_rights(R_ADMIN))
+		return
+
+	var/color = tgui_alert(usr, "Вы уверены?", "Выдать всем туллганы", list("Да", "Нет"))
+	if(color != "Да")
+		return
+	var/give_antag = tgui_alert(usr, "Выдать цель остаться в живых?", "Выдать всем туллганы", list("Да", "Нет"))
+
+	for(var/mob/living/carbon/human/H in GLOB.alive_player_list)
+		if(!is_station_level(H.z))
+			continue
+		H.put_in_active_hand(new /obj/item/toolgun/spawn_only, TRUE, TRUE)
+		if(give_antag == "Да")
+			var/datum/antagonist/custom/survivor = new()
+			survivor.name = "Выживший"
+			var/datum/objective/custom/rip_and_tear = new()
+			rip_and_tear.explanation_text = "Останьтесь последним выжившим на станции, убив всех остальных игроков."
+			survivor.objectives += rip_and_tear
+			H.mind.add_antag_datum(survivor)
+
 /datum/emote/living/chillman
 	name = "Спокойствие!"
 	key = "chill"

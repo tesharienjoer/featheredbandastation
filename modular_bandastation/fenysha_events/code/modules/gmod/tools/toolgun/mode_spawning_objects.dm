@@ -10,6 +10,7 @@
 		/obj/tear_in_reality,
 		/obj/cascade_portal,
 		/obj/tesla_ball,
+		/obj/energy_ball,
 		/obj/docking_port,
 		/obj/pathfind_guy,
 		/obj/item/toolgun, // Не хочу, чтобы ими спамили
@@ -17,7 +18,7 @@
 		/obj/item/debug/omnitool/item_spawner,
 		/obj/item/gun/magic/wand/death, // Думаю никому не хочется, чтобы его убили просто так
 		/obj/item/storage/box/debugtools,
-		/obj/item/mod/control/pre_equipped/debug, // И это тоже
+		/obj/item/mod/control/pre_equipped/debug, // И это тоже,
 	)
 
 /datum/toolgun_mode/spawning/objects/get_root_type()
