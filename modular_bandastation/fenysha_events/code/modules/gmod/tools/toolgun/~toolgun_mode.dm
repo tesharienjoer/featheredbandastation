@@ -67,6 +67,8 @@
 	var/custom_indestructible = FALSE
 	var/list/type_blacklist = list()
 
+	COOLDOWN_DECLARE(seach_cd)
+
 	var/static/list/cached_type_nodes_by_key
 	var/static/list/cached_entries_by_key
 
@@ -79,6 +81,10 @@
 	if(!current_browse_path)
 		current_browse_path = get_root_path_text()
 	sync_settings_from_selected_type()
+
+/datum/toolgun_mode/spawning/on_selected(mob/user)
+	. = ..()
+	current_search = ""
 
 /datum/toolgun_mode/spawning/proc/get_root_type()
 	return /obj
@@ -187,6 +193,7 @@
 
 /datum/toolgun_mode/spawning/ui_data(mob/user)
 	. = ..()
+	sync_settings_from_selected_type()
 	.[get_selected_data_key()] = selected_type_path
 	.["browse_path"] = current_browse_path
 	.["search"] = current_search
@@ -243,8 +250,12 @@
 			sync_settings_from_selected_type()
 		return TRUE
 
-	else if(action == "set_search")
+	else if(action == "set_search" && COOLDOWN_FINISHED(src, seach_cd))
 		current_search = trimtext(params["search"])
+		if(length(current_search) < 3)
+			return TRUE
+
+		COOLDOWN_START(src, seach_cd, 1.5 SECONDS)
 		loaded_limit = page_size
 		return TRUE
 

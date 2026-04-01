@@ -1,6 +1,6 @@
 /obj/item/toolgun
-	name = "Toolgun"
-	desc = "Some kind of a revolver with a bluespace power cell and an anomaly core attached together."
+	name = "Туллган"
+	desc = "Странный револьер с кучей проводов и дисплеем приделанным к его основанию!"
 	icon = 'modular_bandastation/fenysha_events/icons/items/tools/gmod_tools.dmi'
 	icon_state = "toolgun"
 	inhand_icon_state = "toolgun"
@@ -37,12 +37,14 @@
 
 /obj/item/toolgun/examine(mob/user)
 	. = ..()
-	. += span_notice("Use attack self to open toolgun UI and switch modes from the top panel.")
+	. += span_notice("Используй в руке, чтобы изменить режим работы!")
 	if(!selected_mode)
-		. += span_notice("No selected mode!")
+		. += span_notice("Режим не выбран!")
 		return
 	. += span_notice(selected_mode.desc)
 
+	if(!user?.client?.holder)
+		. += span_boldwarning("\n Кажется у меня не должно его быть!")
 
 /obj/item/toolgun/examine_more(mob/user)
 	. = ..()
@@ -95,7 +97,9 @@
 		var/selected_key = trimtext(params["mode_key"])
 		if(!length(selected_key))
 			return TRUE
-		for(var/datum/toolgun_mode/mode_path in available_modes)
+		for(var/path in available_modes)
+			var/datum/toolgun_mode/mode_path = path
+
 			if(initial(mode_path.mode_key) != selected_key)
 				continue
 			select_mode_by_path(mode_path, usr)

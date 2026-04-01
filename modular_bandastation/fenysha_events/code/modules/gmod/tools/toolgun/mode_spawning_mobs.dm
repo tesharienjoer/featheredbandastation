@@ -23,13 +23,10 @@
 	var/mob_melee_damage_upper = 0
 
 /datum/toolgun_mode/spawning/mobs/get_root_type()
-	return /mob/living
-
-/datum/toolgun_mode/spawning/mobs/get_default_type()
-	return /mob/living
+	return /mob
 
 /datum/toolgun_mode/spawning/mobs/get_root_path_text()
-	return "/mob/living"
+	return "/mob"
 
 /datum/toolgun_mode/spawning/mobs/sync_settings_from_selected_type()
 	..()

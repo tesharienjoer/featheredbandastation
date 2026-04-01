@@ -81,5 +81,8 @@ map trainstation
 	votable
 endmap
 
+map construct
+endmap
+
 map silentstation
 endmap

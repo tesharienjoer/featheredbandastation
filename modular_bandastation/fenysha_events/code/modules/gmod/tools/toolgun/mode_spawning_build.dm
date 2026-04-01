@@ -3,10 +3,8 @@
 	desc = "Режим строительства для быстрой постройки чего-либо. Абсолютно бесплатно!"
 	mode_key = "build"
 	type_blacklist = list(
-		/turf/cordon,
 		/turf/baseturf_skipover,
 		/turf/baseturf_bottom,
-		/turf/template_noop,
 		/turf/open/genturf,
 		/turf/open/openspace,
 	)
@@ -19,7 +17,7 @@
 	return /turf
 
 /datum/toolgun_mode/spawning/build_mode/get_default_type()
-	return /turf/open/floor/plating
+	return /turf
 
 /datum/toolgun_mode/spawning/build_mode/get_root_path_text()
 	return "/turf"
