@@ -28,7 +28,7 @@
 	)
 	/// The datum of the beam
 	var/datum/beam/work_beam
-	var/use_cooldown = 5 SECONDS
+	var/use_cooldown = 0.5 SECONDS
 
 	COOLDOWN_DECLARE(sound_cd)
 	COOLDOWN_DECLARE(work_cd)
@@ -106,6 +106,7 @@
 			if(initial(mode_path.mode_key) != selected_key)
 				continue
 			select_mode_by_path(mode_path, usr)
+			ui.send_full_update(force = TRUE)
 			return TRUE
 		return TRUE
 	if(!selected_mode)

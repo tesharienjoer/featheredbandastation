@@ -22,6 +22,7 @@
 	ui = SStgui.try_update_ui(user, our_tool ? our_tool : user, ui)
 	if(!ui)
 		ui = new(user, our_tool ? our_tool : user, tgui_ui_id)
+		ui.set_autoupdate(FALSE)
 		ui.open()
 
 /datum/toolgun_mode/ui_data(mob/user)
@@ -189,6 +190,7 @@
 /datum/toolgun_mode/spawning/ui_static_data(mob/user)
 	return list(
 		"type_nodes" = get_cached_type_nodes(),
+		"objects_all" = get_cached_entries(),
 	)
 
 /datum/toolgun_mode/spawning/ui_data(mob/user)
@@ -197,39 +199,13 @@
 	.[get_selected_data_key()] = selected_type_path
 	.["browse_path"] = current_browse_path
 	.["search"] = current_search
+	.["loaded_limit"] = loaded_limit
+	.["page_size"] = page_size
 	.["use_custom_color"] = use_custom_color
 	.["custom_color"] = custom_color
 	.["custom_density"] = custom_density
 	.["custom_opacity"] = custom_opacity
 	.["custom_indestructible"] = custom_indestructible
-
-	var/list/visible_entries = list()
-	var/match_count = 0
-	var/filter_by_search = length(current_search) > 0
-	var/normalized_search = lowertext(current_search)
-
-	for(var/list/object_entry as anything in get_cached_entries())
-		var/object_type = object_entry["type"]
-
-		if(!filter_by_search)
-			var/immediate_parent = copytext(object_type, 1, findlasttext(object_type, "/"))
-			if(immediate_parent != current_browse_path)
-				continue
-
-		if(filter_by_search)
-			var/object_name = lowertext("[object_entry["name"]]")
-			var/lower_type = lowertext(object_type)
-			if(!findtext(object_name, normalized_search) && !findtext(lower_type, normalized_search))
-				continue
-
-		match_count++
-		if(filter_by_search || match_count <= loaded_limit)
-			visible_entries += list(object_entry)
-
-	.[get_entry_list_key()] = visible_entries
-	.["visible_count"] = length(visible_entries)
-	.["match_count"] = match_count
-	.["has_more"] = !filter_by_search && match_count > loaded_limit
 
 /datum/toolgun_mode/spawning/ui_act(action, list/params, datum/tgui/ui, datum/ui_state/state)
 	if(action == "browse_to")
@@ -250,7 +226,7 @@
 			sync_settings_from_selected_type()
 		return TRUE
 
-	else if(action == "set_search" && COOLDOWN_FINISHED(src, seach_cd))
+	else if((action == "set_search") && COOLDOWN_FINISHED(src, seach_cd))
 		current_search = trimtext(params["search"])
 		if(length(current_search) < 3)
 			return TRUE

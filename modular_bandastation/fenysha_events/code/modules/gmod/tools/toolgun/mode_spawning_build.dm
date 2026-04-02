@@ -34,6 +34,12 @@
 /datum/toolgun_mode/spawning/build_mode/get_spawn_action_name()
 	return "build_here"
 
+/datum/toolgun_mode/spawning/build_mode/ui_static_data(mob/user)
+	return list(
+		"type_nodes" = get_cached_type_nodes(),
+		"objects_all" = get_cached_entries(),
+	)
+
 /datum/toolgun_mode/spawning/build_mode/ui_data(mob/user)
 	. = ..()
 	.["build_action"] = build_action
@@ -71,11 +77,11 @@
 /datum/toolgun_mode/spawning/build_mode/secondnary_act(atom/target, mob/user)
 	var/turf/target_turf = get_turf(target)
 	if(!target_turf)
-		return TRUE
+		return FALSE
 	selected_type = target_turf.type
 	selected_type_path = "[target_turf.type]"
 	our_tool.balloon_alert(user, "Выбрано [target_turf]!")
-	return TRUE
+	return FALSE
 
 /datum/toolgun_mode/spawning/build_mode/proc/apply_to_turf(turf/target_turf)
 	if(!target_turf || !selected_type || !ispath(selected_type, /turf))

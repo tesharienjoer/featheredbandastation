@@ -21,8 +21,9 @@
 
 /obj/effect/mapping_helpers/backrooms_trap
 	name = "backrooms trap"
-	icon_state = "mapping_error"
+	icon_state = "merge_conflict_marker"
 	late = TRUE
+	alpha = 0
 
 /obj/effect/mapping_helpers/backrooms_trap/LateInitialize()
 	var/turf/open/floor/floor = get_turf(src)
@@ -34,7 +35,8 @@ GLOBAL_LIST_EMPTY(backrooms_fall_points)
 
 /obj/effect/mapping_helpers/backrooms_fall_point
 	name = "backrooms fall point"
-	icon_state = "mapping_error"
+	icon_state = "merge_conflict_marker"
+	alpha = 0
 	late = TRUE
 
 /obj/effect/mapping_helpers/backrooms_fall_point/Initialize(mapload)

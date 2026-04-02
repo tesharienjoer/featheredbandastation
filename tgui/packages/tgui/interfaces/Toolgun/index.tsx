@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Stack } from 'tgui-core/components';
 
 import { useBackend } from '../../backend';
@@ -8,7 +8,7 @@ import { ColorMode } from './modes/ColorMode';
 import { ModeTabs } from './modes/ModeTabs';
 import { ResizeMode } from './modes/ResizeMode';
 import { SpawnMode } from './modes/SpawnMode';
-import type { ToolgunData, ToolgunTypeNode } from './types';
+import type { ToolgunData, ToolgunObject, ToolgunTypeNode } from './types';
 
 type ActFn = (action: string, payload?: Record<string, unknown>) => void;
 
@@ -19,8 +19,8 @@ type ToolgunViewModel = {
   search: string;
   normalizedSearch: string;
   selectedPath: string;
-  visibleObjects: ToolgunData['objects'];
-  selectedEntry: ToolgunData['objects'][number] | undefined;
+  visibleObjects: ToolgunObject[];
+  selectedEntry: ToolgunObject | undefined;
   currentBrowsePath: string;
   childrenByParent: Record<string, ToolgunTypeNode[]>;
   currentChildNodes: ToolgunTypeNode[];
@@ -146,46 +146,178 @@ export function Toolgun() {
   const modeKey = data.mode_key ?? 'generic';
 
   const [search, setSearch] = useState(data.search ?? '');
-  const [debouncedSearch, setDebouncedSearch] = useState(data.search ?? '');
-
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 350);
-    return () => clearTimeout(timer);
-  }, [search]);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const backendSearch = data.search ?? '';
-    if (debouncedSearch !== backendSearch) {
-      act('set_search', { search: debouncedSearch });
+    if (search !== backendSearch) {
+      setSearch(backendSearch);
     }
-  }, [debouncedSearch, data.search, act]);
-
-  useEffect(() => {
-    const backendSearch = data.search ?? '';
-    setSearch(backendSearch);
-    setDebouncedSearch(backendSearch);
   }, [data.search, modeKey]);
 
-  const normalizedSearch = debouncedSearch.trim().toLowerCase();
+  useEffect(() => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+
+    const trimmedSearch = search.trim();
+    const backendSearch = data.search ?? '';
+
+    if (trimmedSearch === '') {
+      if (backendSearch !== '') {
+        act('set_search', { search: '' });
+      }
+      return;
+    }
+
+    if (trimmedSearch === backendSearch) {
+      return;
+    }
+
+    // Debounce для непустого поиска
+    const timer = setTimeout(() => {
+      act('set_search', { search: trimmedSearch });
+    }, 450);
+
+    timeoutRef.current = timer;
+
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, [search, data.search, act]);
+
+  const normalizedSearch = search.trim().toLowerCase();
+
   const selectedPath =
     modeKey === 'build'
       ? (data.selected_turf ?? '')
       : (data.selected_type ?? '');
-  const visibleObjects =
-    modeKey === 'build' ? (data.turfs ?? []) : (data.objects ?? []);
-  const selectedEntry = visibleObjects.find(
-    (entry) => entry.type === selectedPath,
-  );
+
+  const allObjects = useMemo<ToolgunObject[]>(() => {
+    if (modeKey === 'build') {
+      return data.turfs ?? [];
+    }
+    return data.objects_all ?? data.objects ?? [];
+  }, [modeKey, data.turfs, data.objects_all, data.objects]);
+
   const currentBrowsePath =
     data.browse_path ??
     (modeKey === 'build' ? '/turf' : modeKey === 'mobs' ? '/mob' : '/obj');
 
+  const loadedLimit = data.loaded_limit ?? 80;
+
+  const visibleObjects = useMemo<ToolgunObject[]>(() => {
+    if (modeKey === 'build') {
+      return allObjects;
+    }
+
+    if (!data.objects_all?.length) {
+      return data.objects ?? [];
+    }
+
+    const s = normalizedSearch;
+
+    if (s) {
+      return allObjects.filter((entry) => {
+        const name = (entry.name ?? '').toLowerCase();
+        const type = (entry.type ?? '').toLowerCase();
+        return name.includes(s) || type.includes(s);
+      });
+    }
+
+    const matches: ToolgunObject[] = [];
+    for (let i = 0; i < allObjects.length; i++) {
+      const entry = allObjects[i];
+      const type = entry.type ?? '';
+      const lastSlash = type.lastIndexOf('/');
+      const parent = lastSlash > 0 ? type.slice(0, lastSlash) : '';
+      if (parent !== currentBrowsePath) continue;
+      matches.push(entry);
+      if (matches.length >= loadedLimit) break;
+    }
+    return matches;
+  }, [
+    modeKey,
+    allObjects,
+    data.objects,
+    data.objects_all,
+    normalizedSearch,
+    currentBrowsePath,
+    loadedLimit,
+  ]);
+
+  const { matchCount, hasMore, visibleCount } = useMemo(() => {
+    if (modeKey === 'build') {
+      return { matchCount: 0, hasMore: false, visibleCount: 0 };
+    }
+
+    if (
+      typeof data.match_count === 'number' &&
+      typeof data.visible_count === 'number' &&
+      typeof data.has_more === 'boolean'
+    ) {
+      return {
+        matchCount: data.match_count,
+        visibleCount: data.visible_count,
+        hasMore: data.has_more,
+      };
+    }
+
+    if (!data.objects_all?.length) {
+      const c = (data.objects ?? []).length;
+      return { matchCount: c, visibleCount: c, hasMore: false };
+    }
+
+    const s = normalizedSearch;
+    if (s) {
+      const count = allObjects.reduce((acc, entry) => {
+        const name = (entry.name ?? '').toLowerCase();
+        const type = (entry.type ?? '').toLowerCase();
+        return acc + (name.includes(s) || type.includes(s) ? 1 : 0);
+      }, 0);
+      return {
+        matchCount: count,
+        visibleCount: visibleObjects.length,
+        hasMore: false,
+      };
+    }
+
+    let count = 0;
+    for (let i = 0; i < allObjects.length; i++) {
+      const type = allObjects[i].type ?? '';
+      const lastSlash = type.lastIndexOf('/');
+      const parent = lastSlash > 0 ? type.slice(0, lastSlash) : '';
+      if (parent === currentBrowsePath) count++;
+    }
+    return {
+      matchCount: count,
+      visibleCount: visibleObjects.length,
+      hasMore: count > loadedLimit,
+    };
+  }, [
+    modeKey,
+    data.match_count,
+    data.visible_count,
+    data.has_more,
+    data.objects,
+    data.objects_all,
+    normalizedSearch,
+    allObjects,
+    visibleObjects.length,
+    currentBrowsePath,
+    loadedLimit,
+  ]);
+
+  const selectedEntry = useMemo(() => {
+    return allObjects.find((entry) => entry.type === selectedPath);
+  }, [allObjects, selectedPath]);
+
   const childrenByParent = useMemo<Record<string, ToolgunTypeNode[]>>(() => {
     const map: Record<string, ToolgunTypeNode[]> = {};
     Object.values(data.type_nodes ?? {}).forEach((node) => {
-      if (!node.parent) {
-        return;
-      }
+      if (!node.parent) return;
       map[node.parent] = map[node.parent] || [];
       map[node.parent].push(node);
     });
@@ -196,7 +328,12 @@ export function Toolgun() {
 
   const vm: ToolgunViewModel = {
     act,
-    data,
+    data: {
+      ...data,
+      has_more: hasMore,
+      visible_count: visibleCount,
+      match_count: matchCount,
+    },
     modeKey,
     search,
     normalizedSearch,
@@ -214,7 +351,7 @@ export function Toolgun() {
   );
 
   return (
-    <Window width={1120} height={700} title={data.mode_name || 'Toolgun'}>
+    <Window width={1120} height={750} title={data.mode_name || 'Toolgun'}>
       <Window.Content style={{ backgroundColor: '#333333' }}>
         <Stack vertical fill>
           <Stack.Item>

@@ -29,6 +29,8 @@ export type ToolgunData = {
   has_more?: boolean;
   visible_count?: number;
   match_count?: number;
+  loaded_limit?: number;
+  page_size?: number;
   use_custom_color?: boolean;
   custom_color?: string;
   custom_density?: boolean;
@@ -39,7 +41,8 @@ export type ToolgunData = {
   selected_color?: string;
   scale_value?: number;
   type_nodes: Record<string, ToolgunTypeNode>;
-  objects: ToolgunObject[];
+  objects?: ToolgunObject[];
+  objects_all?: ToolgunObject[];
   turfs?: ToolgunObject[];
   mob_ai_controller?: string;
   mob_max_health?: number;
