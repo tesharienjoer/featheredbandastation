@@ -1,5 +1,6 @@
 /area
 	var/daylight = FALSE
+	var/has_virtual_lighting = FALSE
 
 /area/Initialize(mapload)
 	. = ..()
@@ -9,6 +10,56 @@
 	. = ..()
 	remove_daylight()
 
+
+/area/proc/clear_virtual_lighting()
+	if(!has_virtual_lighting)
+		return
+	var/list/z_offsets = SSmapping.z_level_to_plane_offset
+	for (var/area_zlevel in 1 to get_highest_zlevel())
+		if(z_offsets[area_zlevel])
+			for(var/turf/area_turf as anything in get_turfs_by_zlevel(area_zlevel))
+				area_turf.luminosity = 0
+	area_has_base_lighting = FALSE
+	has_virtual_lighting = FALSE
+
+
+/area/proc/update_virtual_lighting(intensity = 1)
+	if(!has_virtual_lighting)
+		return
+	var/list/z_offsets = SSmapping.z_level_to_plane_offset
+	for (var/area_zlevel in 1 to get_highest_zlevel())
+		if(z_offsets[area_zlevel])
+			for(var/turf/area_turf as anything in get_turfs_by_zlevel(area_zlevel))
+				area_turf.luminosity = intensity
+
+/area/proc/add_virtual_lighting(intensity = 1)
+	if(!has_virtual_lighting)
+		return
+	var/list/z_offsets = SSmapping.z_level_to_plane_offset
+	for (var/area_zlevel in 1 to get_highest_zlevel())
+		if(z_offsets[area_zlevel])
+			for(var/turf/area_turf as anything in get_turfs_by_zlevel(area_zlevel))
+				area_turf.luminosity = intensity
+	area_has_base_lighting = TRUE
+	has_virtual_lighting = TRUE
+
+/area/proc/set_virtual_lighting(intensity = 1)
+	if(has_virtual_lighting)
+		return
+	if(intensity <= 0.2)
+		area_has_base_lighting = FALSE
+		return
+	var/list/z_offsets = SSmapping.z_level_to_plane_offset
+	for (var/area_zlevel in 1 to get_highest_zlevel())
+		if(z_offsets[area_zlevel])
+			for(var/turf/area_turf as anything in get_turfs_by_zlevel(area_zlevel))
+				area_turf.luminosity = intensity * 2
+		else
+			for(var/turf/area_turf as anything in get_turfs_by_zlevel(area_zlevel))
+				area_turf.luminosity = 0
+	area_has_base_lighting = TRUE
+	has_virtual_lighting = TRUE
+
 /area/proc/initialize_daylight()
 	if(daylight)
 		SSdaylight.daylight_areas += src
@@ -17,6 +68,48 @@
 /area/proc/remove_daylight()
 	if(daylight)
 		SSdaylight.daylight_areas -= src
+
+/datum/daylight_phase
+	var/name = "Phase"
+	var/color = "#ffffff"
+	var/start_time = 0
+	var/target_intensity = 1
+
+/datum/daylight_phase/dawn
+	name = "Dawn"
+	color = "#31211b"
+	start_time = 4 HOURS
+	target_intensity = 0.2
+
+/datum/daylight_phase/sunrise
+	name = "Sunrise"
+	color = "#F598AB"
+	start_time = 5 HOURS
+	target_intensity = 0.55
+
+/datum/daylight_phase/daytime
+	name = "Daytime"
+	color = "#FFFFFF"
+	start_time = 5.5 HOURS
+	target_intensity = 1
+
+/datum/daylight_phase/sunset
+	name = "Sunset"
+	color = "#ff8a63"
+	start_time = 19 HOURS
+	target_intensity = 0.45
+
+/datum/daylight_phase/dusk
+	name = "Dusk"
+	color = "#2b2842"
+	start_time = 19.5 HOURS
+	target_intensity = 0.18
+
+/datum/daylight_phase/midnight
+	name = "Midnight"
+	color = "#101c3b"
+	start_time = 20 HOURS
+	target_intensity = 0.08
 
 SUBSYSTEM_DEF(daylight)
 	name = "Daylight Controller"
@@ -53,20 +146,51 @@ SUBSYSTEM_DEF(daylight)
 	var/setup_running = FALSE
 
 	var/last_cycle_progress = -1
-
-	var/static/list/day_colors = list(
-		"0.00"  = "#ff704d",
-		"0.10"  = "#ffab81",
-		"0.20"  = "#ffd1a8",
-		"0.35"  = "#fffdf7",
-		"0.50"  = "#fffdf7",
-		"0.65"  = "#fffdf7",
-		"0.78"  = "#ffda9f",
-		"0.88"  = "#ffb875",
-		"0.94"  = "#ff8f5c",
-		"1.00"  = "#ff5f3a"
+	var/datum/daylight_phase/current_phase
+	var/datum/daylight_phase/next_phase
+	var/list/daylight_phases = list(
+		new /datum/daylight_phase/dawn(),
+		new /datum/daylight_phase/sunrise(),
+		new /datum/daylight_phase/daytime(),
+		new /datum/daylight_phase/sunset(),
+		new /datum/daylight_phase/dusk(),
+		new /datum/daylight_phase/midnight()
 	)
-	var/static/night_color = "#b1b1b1"
+	var/last_phase_name
+
+	var/mob_visual_update_cooldown = 3 SECONDS
+	COOLDOWN_DECLARE(mob_visual_cd)
+
+	var/list/phase_particle_weights = list(
+		"Dawn" = list(
+			/particles/daylight_weather/rain = 5,
+			/particles/daylight_weather/mist = 3,
+		),
+		"Sunrise" = list(
+			/particles/daylight_weather/mist = 6,
+			/particles/daylight_weather/rain = 2,
+		),
+		"Daytime" = list(
+			/particles/daylight_weather/dust = 7,
+			/particles/daylight_weather/mist = 2,
+		),
+		"Sunset" = list(
+			/particles/daylight_weather/rain = 5,
+			/particles/daylight_weather/dust = 2,
+		),
+		"Dusk" = list(
+			/particles/daylight_weather/snow = 5,
+			/particles/daylight_weather/mist = 3,
+		),
+		"Midnight" = list(
+			/particles/daylight_weather/snow = 7,
+			/particles/daylight_weather/mist = 2,
+		),
+	)
+	var/current_particle_weather = /particles/daylight_weather/mist
+	var/visual_weather_override = "auto"
+	var/visual_weather_strength = 0
+	var/target_visual_weather_strength = 0
 
 	var/daylight_update_cooldown = 2 MINUTES
 	// Daylight cycle in minutes
@@ -77,10 +201,12 @@ SUBSYSTEM_DEF(daylight)
 	SSticker.station_time_rate_multiplier = 1440 / daylight_cycle
 
 	current_rgb = hex2rgb(current_color)
-	var/initial_progress = station_time() / (24 HOURS)
+	var/initial_progress = get_cycle_progress()
 	last_cycle_progress = initial_progress
-	current_intensity = clamp(initial_progress / daylight_fraction, 0, 1)
-	current_color = get_daylight_color(current_intensity)
+	resolve_phase()
+	var/list/phase_state = get_phase_light_state()
+	current_intensity = phase_state["intensity"]
+	current_color = phase_state["color"]
 	update_current(current_intensity, current_color)
 
 	return SS_INIT_SUCCESS
@@ -88,7 +214,7 @@ SUBSYSTEM_DEF(daylight)
 /datum/controller/subsystem/daylight/proc/update_area(area/A)
 	if(!istype(A) || QDELETED(A) || !A.daylight)
 		return
-	A.set_base_lighting(current_color, round(current_intensity * 255, 1))
+	A.set_virtual_lighting(round(current_intensity * 255, 1))
 
 /datum/controller/subsystem/daylight/proc/register_emitter(obj/effect/light_emitter/daylight/emitter)
 	if(!emitter || QDELETED(emitter) || (emitter in all_emitters))
@@ -105,7 +231,7 @@ SUBSYSTEM_DEF(daylight)
 	setup_running = TRUE
 	for(var/area/A in daylight_areas)
 		update_area(A)
-		stoplag(1)
+		CHECK_TICK
 	setup_running = FALSE
 
 /datum/controller/subsystem/daylight/proc/set_target(intensity, color)
@@ -137,38 +263,127 @@ SUBSYSTEM_DEF(daylight)
 			E.apply_current_state()
 		SEND_SIGNAL(src, COMSIG_DAYLIGHT_UPDATED, current_intensity, current_color)
 
-/datum/controller/subsystem/daylight/proc/get_daylight_color(progress = 0)
-	progress = clamp(progress, 0, 1)
+/datum/controller/subsystem/daylight/proc/get_cycle_progress()
+	return station_time() / (24 HOURS)
 
-	if(progress <= 0)
-		return "#ff704d"
-	if(progress >= 1)
-		return "#ff5f3a"
+/datum/controller/subsystem/daylight/proc/resolve_phase()
+	var/time_now = station_time()
+	var/datum/daylight_phase/new_current
+	var/datum/daylight_phase/new_next
 
-	var/list/keys = sort_list(day_colors)
+	for(var/i in 1 to length(daylight_phases))
+		var/datum/daylight_phase/phase = daylight_phases[i]
+		if(time_now >= phase.start_time)
+			new_current = phase
+			new_next = (i == length(daylight_phases)) ? daylight_phases[1] : daylight_phases[i + 1]
 
-	var/lower = 0
-	var/upper = 1
-	var/lower_key = "0.00"
-	var/upper_key = "1.00"
+	if(!new_current)
+		new_current = daylight_phases[length(daylight_phases)]
+		new_next = daylight_phases[1]
 
-	for(var/key in keys)
-		var/val = text2num(key)
-		if(val <= progress && val > lower)
-			lower = val
-			lower_key = key
-		if(val >= progress && val < upper)
-			upper = val
-			upper_key = key
+	current_phase = new_current
+	next_phase = new_next
 
-	var/color1 = day_colors[lower_key]
-	var/color2 = day_colors[upper_key]
+/datum/controller/subsystem/daylight/proc/get_phase_progress()
+	if(!current_phase || !next_phase)
+		return 0
 
-	if(lower == upper || lower_key == upper_key)
-		return color1
+	var/full_day = 24 HOURS
+	var/duration = next_phase.start_time - current_phase.start_time
+	if(duration <= 0)
+		duration += full_day
 
-	var/mix = (progress - lower) / (upper - lower)
-	return color_interpolate(color1, color2, mix)
+	var/elapsed = station_time() - current_phase.start_time
+	if(elapsed < 0)
+		elapsed += full_day
+
+	if(duration <= 0)
+		return 0
+
+	return clamp(elapsed / duration, 0, 1)
+
+/datum/controller/subsystem/daylight/proc/get_phase_light_state()
+	resolve_phase()
+	var/mix = get_phase_progress()
+	var/color = color_interpolate(current_phase.color, next_phase.color, mix)
+	var/intensity = lerp(current_phase.target_intensity, next_phase.target_intensity, mix)
+	if(current_phase?.name == "Dusk" || current_phase?.name == "Midnight" || next_phase?.name == "Midnight")
+		// Preserve atmospheric moonlight at night so blacks are not crushed.
+		var/moonlight_ratio = clamp(1 - intensity, 0, 1)
+		color = color_interpolate(color, "#6f86b6", moonlight_ratio * 0.4)
+		intensity = max(intensity, 0.06)
+	return list("color" = color, "intensity" = clamp(intensity, 0, 1))
+
+/datum/controller/subsystem/daylight/proc/get_manual_light_color(value)
+	var/datum/daylight_phase/day_phase = daylight_phases[3]
+	var/datum/daylight_phase/night_phase = daylight_phases[6]
+	return color_interpolate(night_phase.color, day_phase.color, clamp(value, 0, 1))
+
+/datum/controller/subsystem/daylight/proc/get_auto_weather_particle_type()
+	resolve_phase()
+	var/list/particle_weights = phase_particle_weights[current_phase?.name]
+	if(!length(particle_weights))
+		return /particles/daylight_weather/mist
+	return pick_weight(particle_weights)
+
+/datum/controller/subsystem/daylight/proc/get_weather_particle_type()
+	if(visual_weather_override == "rain")
+		return /particles/daylight_weather/rain
+	if(visual_weather_override == "snow")
+		return /particles/daylight_weather/snow
+	if(visual_weather_override == "dust")
+		return /particles/daylight_weather/dust
+	if(visual_weather_override == "mist")
+		return /particles/daylight_weather/mist
+	if(visual_weather_override == "none")
+		return null
+	var/next_auto = get_auto_weather_particle_type()
+	if(next_auto)
+		current_particle_weather = next_auto
+	return current_particle_weather
+
+/datum/controller/subsystem/daylight/proc/update_mob_visuals()
+	var/particle_type = get_weather_particle_type()
+	target_visual_weather_strength = clamp((1 - current_intensity) * 1.15, 0.05, 1)
+	if(visual_weather_override == "none")
+		target_visual_weather_strength = 0
+	visual_weather_strength = lerp(visual_weather_strength, target_visual_weather_strength, 0.35)
+	var/overlay_alpha = round(clamp((1 - current_intensity) * 140, 20, 140), 1)
+
+	for(var/mob/living/player as anything in GLOB.alive_player_list)
+		if(!player.client)
+			continue
+		var/datum/preferences/prefs = player.client?.prefs
+		var/use_daylight_tint = prefs ? prefs.read_preference(/datum/preference/toggle/daylight_tint_fx) : TRUE
+		var/use_daylight_particles = prefs ? prefs.read_preference(/datum/preference/toggle/daylight_particle_fx) : TRUE
+
+		var/area/A = get_area(player)
+		if(!A || !A.daylight)
+			player.clear_fullscreen("daylight_tint", 2)
+			player.clear_fullscreen("daylight_particles", 2)
+			continue
+
+		if(!use_daylight_tint)
+			player.clear_fullscreen("daylight_tint", 2)
+		else
+			var/atom/movable/screen/fullscreen/daylight_tint/tint_overlay = player.overlay_fullscreen("daylight_tint", /atom/movable/screen/fullscreen/daylight_tint)
+			if(tint_overlay)
+				animate(tint_overlay, alpha = overlay_alpha, color = current_color, time = max(1, round(mob_visual_update_cooldown / (1 SECONDS), 1)))
+
+		if(!use_daylight_particles)
+			player.clear_fullscreen("daylight_particles", 2)
+		else
+			var/atom/movable/screen/fullscreen/daylight_particles/particle_overlay = player.overlay_fullscreen("daylight_particles", /atom/movable/screen/fullscreen/daylight_particles)
+			if(!particle_overlay)
+				continue
+			if(!particle_type)
+				animate(particle_overlay, alpha = 0, time = max(1, round(mob_visual_update_cooldown / (1 SECONDS), 1)))
+				continue
+			if(!particle_overlay.particles || particle_overlay.current_particle_type != particle_type)
+				particle_overlay.particles = new particle_type()
+				particle_overlay.current_particle_type = particle_type
+			var/target_particle_alpha = round(clamp(visual_weather_strength * 160, 0, 170), 1)
+			animate(particle_overlay, alpha = target_particle_alpha, color = current_color, time = max(1, round(mob_visual_update_cooldown / (1 SECONDS), 1)))
 
 /datum/controller/subsystem/daylight/fire()
 	if(transition_steps > 0)
@@ -183,7 +398,7 @@ SUBSYSTEM_DEF(daylight)
 	COOLDOWN_START(src, daylight_update_cd, daylight_update_cooldown)
 
 	var/auto_cycle = (manual_time < 0 && !time_locked && !cycle_locked)
-	var/cycle_progress = station_time() / (24 HOURS)
+	var/cycle_progress = get_cycle_progress()
 
 	if(auto_cycle)
 		if(last_cycle_progress < 0)
@@ -202,18 +417,18 @@ SUBSYSTEM_DEF(daylight)
 		return
 	if(abs(cycle_progress - last_cycle_progress) < delta_cycle_progress)
 		return
-	var/new_value = 0
-	var/color = night_color
+	resolve_phase()
+	var/current_phase_name = current_phase ? current_phase.name : null
+	if(current_phase_name != last_phase_name)
+		last_phase_name = current_phase_name
 
-	if(cycle_progress > daylight_fraction || cycle_progress < (1 - daylight_fraction))
-		new_value = 0.01
-		color = night_color
-	else
-		new_value = clamp(1 - cycle_progress, 0, 1)
-		color = get_daylight_color(new_value)
-
-	set_target(new_value, color)
+	var/list/phase_state = get_phase_light_state()
+	set_target(phase_state["intensity"], phase_state["color"])
 	last_cycle_progress = cycle_progress
+
+	if(COOLDOWN_FINISHED(src, mob_visual_cd))
+		update_mob_visuals()
+		COOLDOWN_START(src, mob_visual_cd, mob_visual_update_cooldown)
 
 /datum/controller/subsystem/daylight/proc/flash(color, duration = 10 SECONDS, transition_time = 2 SECONDS, areas)
 	set waitfor = FALSE
@@ -294,8 +509,8 @@ ADMIN_VERB(set_daylight_time, R_ADMIN, "Set Daylight Time (0-1)", "Force dayligh
 	SSdaylight.cycle_locked = (value >= 0)
 
 	if(value >= 0)
-		var/color = SSdaylight.get_daylight_color(value)
-		SSdaylight.set_intensity_and_color(value, color, TRUE)
+		var/color = SSdaylight.get_manual_light_color(value)
+		SSdaylight.set_intensity_and_color(value, color, FALSE)
 
 	log_admin("[key_name(usr)] set daylight time to [value == -1 ? "AUTO" : value]")
 	message_admins(span_adminnotice("[key_name_admin(usr)] set daytime: [value == -1 ? "auto" : value]"))
@@ -333,6 +548,113 @@ ADMIN_VERB(flash_daylight, R_ADMIN, "Flash Daylight", "Temporarily flash areas w
 	log_admin("[key_name(usr)] triggered daylight flash with color [color] for [duration] seconds")
 	message_admins(span_adminnotice("[key_name_admin(usr)] triggered daylight flash with color [color] for [duration] seconds"))
 
+ADMIN_VERB(open_daylight_control_panel, R_ADMIN, "Open Daylight Control Panel", "Open UI panel for day/night and weather control", ADMIN_CATEGORY_EVENTS)
+	if(!check_rights(R_ADMIN))
+		return
+	var/datum/daylight_control_panel/panel = new
+	panel.ui_interact(usr)
+
+/datum/daylight_control_panel/ui_state(mob/user)
+	return ADMIN_STATE(R_ADMIN)
+
+/datum/daylight_control_panel/ui_interact(mob/user, datum/tgui/ui)
+	ui = SStgui.try_update_ui(user, src, ui)
+	if(!ui)
+		ui = new(user, src, "DaylightControl", "Daylight Control")
+		ui.open()
+
+/datum/daylight_control_panel/ui_data(mob/user)
+	var/list/data = list()
+	data["cycle_locked"] = SSdaylight.cycle_locked
+	data["time_locked"] = SSdaylight.time_locked
+	data["manual_time"] = SSdaylight.manual_time
+	data["daylight_cycle"] = SSdaylight.daylight_cycle
+	data["current_intensity"] = SSdaylight.current_intensity
+	data["current_color"] = SSdaylight.current_color
+	data["current_phase"] = SSdaylight.current_phase ? SSdaylight.current_phase.name : "Unknown"
+	data["active_weather_count"] = (SSdaylight.visual_weather_override == "none") ? 0 : 1
+	data["visual_weather_mode"] = SSdaylight.visual_weather_override
+	return data
+
+/datum/daylight_control_panel/ui_act(action, list/params, datum/tgui/ui, datum/ui_state/state)
+	. = ..()
+	if(.)
+		return
+	if(!check_rights_for(ui.user?.client, R_ADMIN))
+		return
+
+	switch(action)
+		if("set_manual")
+			var/value = text2num(params["value"])
+			value = clamp(value, -1, 1)
+			SSdaylight.manual_time = (value < 0 ? -1 : value)
+			SSdaylight.time_locked = (value >= 0)
+			SSdaylight.cycle_locked = (value >= 0)
+			if(value >= 0)
+				var/color = SSdaylight.get_manual_light_color(value)
+				SSdaylight.set_intensity_and_color(value, color, FALSE)
+			return TRUE
+
+		if("set_cycle_minutes")
+			var/new_cycle = clamp(round(text2num(params["value"]), 1), 5, 240)
+			SSdaylight.daylight_cycle = new_cycle
+			SSticker.station_time_rate_multiplier = 1440 / SSdaylight.daylight_cycle
+			return TRUE
+
+		if("toggle_cycle_lock")
+			SSdaylight.cycle_locked = !SSdaylight.cycle_locked
+			if(!SSdaylight.cycle_locked)
+				SSdaylight.time_locked = FALSE
+				SSdaylight.manual_time = -1
+			return TRUE
+
+		if("set_auto")
+			SSdaylight.manual_time = -1
+			SSdaylight.time_locked = FALSE
+			SSdaylight.cycle_locked = FALSE
+			return TRUE
+
+		if("start_weather")
+			var/selected = params["weather_type"]
+			switch(selected)
+				if("rain")
+					SSdaylight.visual_weather_override = "rain"
+				if("snow")
+					SSdaylight.visual_weather_override = "snow"
+				if("radiation")
+					SSdaylight.visual_weather_override = "dust"
+				if("mist")
+					SSdaylight.visual_weather_override = "mist"
+				if("auto")
+					SSdaylight.visual_weather_override = "auto"
+			log_admin("[key_name(ui.user)] switched visual weather to [SSdaylight.visual_weather_override] from daylight control panel")
+			message_admins(span_adminnotice("[key_name_admin(ui.user)] switched visual weather to [SSdaylight.visual_weather_override] from daylight control panel"))
+			return TRUE
+
+		if("stop_weather")
+			SSdaylight.visual_weather_override = "none"
+			log_admin("[key_name(ui.user)] disabled visual weather from daylight control panel")
+			message_admins(span_adminnotice("[key_name_admin(ui.user)] disabled visual weather from daylight control panel"))
+			return TRUE
+
+	return FALSE
+
+/datum/preference/toggle/daylight_tint_fx
+	category = PREFERENCE_CATEGORY_GAME_PREFERENCES
+	savefile_key = "daylight_tint_fx"
+	savefile_identifier = PREFERENCE_PLAYER
+
+/datum/preference/toggle/daylight_tint_fx/create_default_value()
+	return TRUE
+
+/datum/preference/toggle/daylight_particle_fx
+	category = PREFERENCE_CATEGORY_GAME_PREFERENCES
+	savefile_key = "daylight_particle_fx"
+	savefile_identifier = PREFERENCE_PLAYER
+
+/datum/preference/toggle/daylight_particle_fx/create_default_value()
+	return TRUE
+
 
 /obj/effect/light_emitter
 	flags_1 = NO_TURF_MOVEMENT_1
@@ -365,39 +687,98 @@ ADMIN_VERB(flash_daylight, R_ADMIN, "Flash Daylight", "Temporarily flash areas w
 
 /datum/element/daylight_overlay
 	element_flags = ELEMENT_DETACH_ON_HOST_DESTROY
-	var/mutable_appearance/overlay
 
 /datum/element/daylight_overlay/Attach(datum/target)
 	. = ..()
 	if(!istype(target, /turf))
 		return ELEMENT_INCOMPATIBLE
 
-	var/turf/T = target
-	var/plane_offset = GET_TURF_PLANE_OFFSET(T)
-
-	var/mutable_appearance/light = mutable_appearance('icons/effects/alphacolors.dmi', "white")
-	light.layer = LIGHTING_PRIMARY_LAYER
-	light.blend_mode = BLEND_ADD
-	light.appearance_flags = RESET_TRANSFORM | RESET_ALPHA | RESET_COLOR
-	light.alpha = round(SSdaylight.current_intensity * 255, 1)
-	light.color = SSdaylight.current_color
-	SET_PLANE_W_SCALAR(light, LIGHTING_PLANE, plane_offset)
-
-	T.add_overlay(light)
-	T.luminosity = 1
-	overlay = light
-
 	RegisterSignal(SSdaylight, COMSIG_DAYLIGHT_UPDATED, PROC_REF(update_overlay))
 
 /datum/element/daylight_overlay/Detach(datum/source)
 	. = ..()
-	if(!istype(source, /turf))
-		return
-	var/turf/T = source
-	T.cut_overlay(list(overlay))
-	T.luminosity = 0
+	UnregisterSignal(SSdaylight, COMSIG_DAYLIGHT_UPDATED)
 
 /datum/element/daylight_overlay/proc/update_overlay(datum/source, intensity, color)
 	SIGNAL_HANDLER
-	overlay.alpha = round(intensity * 255, 1)
-	overlay.color = color
+	// Virtual light only: no direct overlay injection on turfs.
+	if(!istype(source, /datum/controller/subsystem/daylight))
+		return
+
+/atom/movable/screen/fullscreen/daylight_tint
+	icon = 'icons/hud/screen_gen.dmi'
+	screen_loc = "WEST,SOUTH to EAST,NORTH"
+	icon_state = "flash"
+	plane = LIGHTING_PLANE
+	layer = LIGHTING_ABOVE_ALL
+	blend_mode = BLEND_MULTIPLY
+	show_when_dead = TRUE
+	needs_offsetting = FALSE
+	alpha = 0
+
+/atom/movable/screen/fullscreen/daylight_particles
+	icon = 'icons/hud/screen_gen.dmi'
+	screen_loc = "WEST,SOUTH to EAST,NORTH"
+	icon_state = "flash"
+	plane = WEATHER_PLANE
+	layer = FULLSCREEN_LAYER + 1
+	blend_mode = BLEND_ADD
+	show_when_dead = TRUE
+	needs_offsetting = FALSE
+	alpha = 0
+	var/current_particle_type = /particles/daylight_weather/mist
+
+/particles/daylight_weather
+	icon = 'icons/effects/particles/generic.dmi'
+	width = 480
+	height = 480
+	count = 120
+	spawning = 0.4
+	lifespan = 1.8 SECONDS
+	fade = 1.2 SECONDS
+	position = generator(GEN_BOX, list(-240, -180, 0), list(240, 240, 0))
+	gravity = list(0, -1.3)
+	drift = generator(GEN_CIRCLE, 0, 2)
+	friction = 0.25
+
+/particles/daylight_weather/rain
+	icon_state = list("drop" = 4, "dot" = 1)
+	color = "#b0d8ff"
+	spawning = 1.2
+	count = 200
+	lifespan = 1.1 SECONDS
+	fade = 0.5 SECONDS
+	gravity = list(0, -4.4)
+	drift = generator(GEN_CIRCLE, 0, 1)
+
+/particles/daylight_weather/snow
+	icon_state = list("dot" = 3, "cross" = 2)
+	color = "#f2f7ff"
+	spawning = 0.5
+	count = 140
+	lifespan = 2.6 SECONDS
+	fade = 1.4 SECONDS
+	gravity = list(0, -1.1)
+	drift = generator(GEN_CIRCLE, 0, 3)
+	spin = generator(GEN_NUM, -8, 8)
+
+/particles/daylight_weather/dust
+	icon_state = list("dot" = 4, "cross" = 1)
+	color = "#c59a6f"
+	spawning = 0.45
+	count = 110
+	lifespan = 2.4 SECONDS
+	fade = 1.1 SECONDS
+	gravity = list(-1.2, -0.4)
+	drift = generator(GEN_CIRCLE, 0, 4)
+	spin = generator(GEN_NUM, -6, 6)
+
+/particles/daylight_weather/mist
+	icon_state = list("dot" = 4)
+	color = "#c7d5e8"
+	spawning = 0.35
+	count = 90
+	lifespan = 3 SECONDS
+	fade = 1.7 SECONDS
+	gravity = list(0, -0.4)
+	drift = generator(GEN_CIRCLE, 0, 2)
