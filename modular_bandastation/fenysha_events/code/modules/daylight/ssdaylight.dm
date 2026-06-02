@@ -1,3 +1,7 @@
+#define SUNLIGHTING_PLANE (LIGHTING_PLANE+1)
+#define SUNLIGHTING_RENDER_TARGET "*SUNLIGHT_PLANE"
+#define RENDER_PLANE_DAYLIGHT 21
+
 /area
 	var/daylight = FALSE
 	var/has_virtual_lighting = FALSE
@@ -14,51 +18,26 @@
 /area/proc/clear_virtual_lighting()
 	if(!has_virtual_lighting)
 		return
-	var/list/z_offsets = SSmapping.z_level_to_plane_offset
-	for (var/area_zlevel in 1 to get_highest_zlevel())
-		if(z_offsets[area_zlevel])
-			for(var/turf/area_turf as anything in get_turfs_by_zlevel(area_zlevel))
-				area_turf.luminosity = 0
-	area_has_base_lighting = FALSE
+	set_virtual_lighting(0)
 	has_virtual_lighting = FALSE
-
 
 /area/proc/update_virtual_lighting(intensity = 1)
 	if(!has_virtual_lighting)
+		add_virtual_lighting(intensity)
 		return
-	var/list/z_offsets = SSmapping.z_level_to_plane_offset
-	for (var/area_zlevel in 1 to get_highest_zlevel())
-		if(z_offsets[area_zlevel])
-			for(var/turf/area_turf as anything in get_turfs_by_zlevel(area_zlevel))
-				area_turf.luminosity = intensity
+	set_virtual_lighting(intensity)
 
 /area/proc/add_virtual_lighting(intensity = 1)
-	if(!has_virtual_lighting)
-		return
-	var/list/z_offsets = SSmapping.z_level_to_plane_offset
-	for (var/area_zlevel in 1 to get_highest_zlevel())
-		if(z_offsets[area_zlevel])
-			for(var/turf/area_turf as anything in get_turfs_by_zlevel(area_zlevel))
-				area_turf.luminosity = intensity
+	set_virtual_lighting(intensity)
 	area_has_base_lighting = TRUE
 	has_virtual_lighting = TRUE
 
 /area/proc/set_virtual_lighting(intensity = 1)
-	if(has_virtual_lighting)
-		return
-	if(intensity <= 0.2)
-		area_has_base_lighting = FALSE
-		return
 	var/list/z_offsets = SSmapping.z_level_to_plane_offset
 	for (var/area_zlevel in 1 to get_highest_zlevel())
 		if(z_offsets[area_zlevel])
 			for(var/turf/area_turf as anything in get_turfs_by_zlevel(area_zlevel))
-				area_turf.luminosity = intensity * 2
-		else
-			for(var/turf/area_turf as anything in get_turfs_by_zlevel(area_zlevel))
-				area_turf.luminosity = 0
-	area_has_base_lighting = TRUE
-	has_virtual_lighting = TRUE
+				area_turf.luminosity = intensity
 
 /area/proc/initialize_daylight()
 	if(daylight)
@@ -68,6 +47,12 @@
 /area/proc/remove_daylight()
 	if(daylight)
 		SSdaylight.daylight_areas -= src
+	clear_virtual_lighting()
+
+
+/area/centcom/central_command_areas/admin/daylight
+	daylight = TRUE
+	outdoors = TRUE
 
 /datum/daylight_phase
 	var/name = "Phase"
@@ -111,6 +96,7 @@
 	start_time = 20 HOURS
 	target_intensity = 0.08
 
+
 SUBSYSTEM_DEF(daylight)
 	name = "Daylight Controller"
 	wait = 1 SECONDS
@@ -122,6 +108,7 @@ SUBSYSTEM_DEF(daylight)
 
 	var/static/list/daylight_areas = list()
 	var/static/list/obj/effect/light_emitter/daylight/all_emitters = list()
+	var/static/list/sunlighting_planes = list()
 
 	var/current_intensity = 1
 	var/current_color = "#ffffff"
@@ -192,8 +179,7 @@ SUBSYSTEM_DEF(daylight)
 	var/visual_weather_strength = 0
 	var/target_visual_weather_strength = 0
 
-	var/daylight_update_cooldown = 2 MINUTES
-	// Daylight cycle in minutes
+	var/daylight_update_cooldown = 12 SECONDS
 	var/daylight_cycle = 60
 	COOLDOWN_DECLARE(daylight_update_cd)
 
@@ -214,7 +200,7 @@ SUBSYSTEM_DEF(daylight)
 /datum/controller/subsystem/daylight/proc/update_area(area/A)
 	if(!istype(A) || QDELETED(A) || !A.daylight)
 		return
-	A.set_virtual_lighting(round(current_intensity * 255, 1))
+	A.update_virtual_lighting(round(current_intensity * 255, 1))
 
 /datum/controller/subsystem/daylight/proc/register_emitter(obj/effect/light_emitter/daylight/emitter)
 	if(!emitter || QDELETED(emitter) || (emitter in all_emitters))
@@ -259,6 +245,7 @@ SUBSYSTEM_DEF(daylight)
 
 	if(changed)
 		update_all_areas()
+		update_sunlight_backdrops()
 		for(var/obj/effect/light_emitter/daylight/E in all_emitters)
 			E.apply_current_state()
 		SEND_SIGNAL(src, COMSIG_DAYLIGHT_UPDATED, current_intensity, current_color)
@@ -308,7 +295,6 @@ SUBSYSTEM_DEF(daylight)
 	var/color = color_interpolate(current_phase.color, next_phase.color, mix)
 	var/intensity = lerp(current_phase.target_intensity, next_phase.target_intensity, mix)
 	if(current_phase?.name == "Dusk" || current_phase?.name == "Midnight" || next_phase?.name == "Midnight")
-		// Preserve atmospheric moonlight at night so blacks are not crushed.
 		var/moonlight_ratio = clamp(1 - intensity, 0, 1)
 		color = color_interpolate(color, "#6f86b6", moonlight_ratio * 0.4)
 		intensity = max(intensity, 0.06)
@@ -342,48 +328,12 @@ SUBSYSTEM_DEF(daylight)
 		current_particle_weather = next_auto
 	return current_particle_weather
 
-/datum/controller/subsystem/daylight/proc/update_mob_visuals()
-	var/particle_type = get_weather_particle_type()
-	target_visual_weather_strength = clamp((1 - current_intensity) * 1.15, 0.05, 1)
-	if(visual_weather_override == "none")
-		target_visual_weather_strength = 0
-	visual_weather_strength = lerp(visual_weather_strength, target_visual_weather_strength, 0.35)
-	var/overlay_alpha = round(clamp((1 - current_intensity) * 140, 20, 140), 1)
-
-	for(var/mob/living/player as anything in GLOB.alive_player_list)
-		if(!player.client)
+/datum/controller/subsystem/daylight/proc/update_sunlight_backdrops()
+	for(var/atom/movable/screen/fullscreen/lighting_backdrop/Sunlight/LB as anything in sunlighting_planes)
+		if(QDELETED(LB))
+			sunlighting_planes -= LB
 			continue
-		var/datum/preferences/prefs = player.client?.prefs
-		var/use_daylight_tint = prefs ? prefs.read_preference(/datum/preference/toggle/daylight_tint_fx) : TRUE
-		var/use_daylight_particles = prefs ? prefs.read_preference(/datum/preference/toggle/daylight_particle_fx) : TRUE
-
-		var/area/A = get_area(player)
-		if(!A || !A.daylight)
-			player.clear_fullscreen("daylight_tint", 2)
-			player.clear_fullscreen("daylight_particles", 2)
-			continue
-
-		if(!use_daylight_tint)
-			player.clear_fullscreen("daylight_tint", 2)
-		else
-			var/atom/movable/screen/fullscreen/daylight_tint/tint_overlay = player.overlay_fullscreen("daylight_tint", /atom/movable/screen/fullscreen/daylight_tint)
-			if(tint_overlay)
-				animate(tint_overlay, alpha = overlay_alpha, color = current_color, time = max(1, round(mob_visual_update_cooldown / (1 SECONDS), 1)))
-
-		if(!use_daylight_particles)
-			player.clear_fullscreen("daylight_particles", 2)
-		else
-			var/atom/movable/screen/fullscreen/daylight_particles/particle_overlay = player.overlay_fullscreen("daylight_particles", /atom/movable/screen/fullscreen/daylight_particles)
-			if(!particle_overlay)
-				continue
-			if(!particle_type)
-				animate(particle_overlay, alpha = 0, time = max(1, round(mob_visual_update_cooldown / (1 SECONDS), 1)))
-				continue
-			if(!particle_overlay.particles || particle_overlay.current_particle_type != particle_type)
-				particle_overlay.particles = new particle_type()
-				particle_overlay.current_particle_type = particle_type
-			var/target_particle_alpha = round(clamp(visual_weather_strength * 160, 0, 170), 1)
-			animate(particle_overlay, alpha = target_particle_alpha, color = current_color, time = max(1, round(mob_visual_update_cooldown / (1 SECONDS), 1)))
+		LB.apply_daylight_state(current_intensity, current_color, mob_visual_update_cooldown)
 
 /datum/controller/subsystem/daylight/fire()
 	if(transition_steps > 0)
@@ -426,9 +376,6 @@ SUBSYSTEM_DEF(daylight)
 	set_target(phase_state["intensity"], phase_state["color"])
 	last_cycle_progress = cycle_progress
 
-	if(COOLDOWN_FINISHED(src, mob_visual_cd))
-		update_mob_visuals()
-		COOLDOWN_START(src, mob_visual_cd, mob_visual_update_cooldown)
 
 /datum/controller/subsystem/daylight/proc/flash(color, duration = 10 SECONDS, transition_time = 2 SECONDS, areas)
 	set waitfor = FALSE
@@ -494,168 +441,6 @@ SUBSYSTEM_DEF(daylight)
 	var/b = round(c1[3] + (c2[3] - c1[3]) * ratio, 1)
 	return rgb(r, g, b)
 
-
-ADMIN_VERB(set_daylight_time, R_ADMIN, "Set Daylight Time (0-1)", "Force daylight intensity or return to auto", ADMIN_CATEGORY_EVENTS)
-	if(!check_rights(R_ADMIN))
-		return
-
-	var/value = input(usr, "Set forced intensity (0 = night, 1 = day, -1 = auto)", "Daylight Control", -1) as num|null
-	if(isnull(value))
-		return
-
-	value = clamp(value, -1, 1)
-	SSdaylight.manual_time = (value < 0 ? -1 : value)
-	SSdaylight.time_locked = (value >= 0)
-	SSdaylight.cycle_locked = (value >= 0)
-
-	if(value >= 0)
-		var/color = SSdaylight.get_manual_light_color(value)
-		SSdaylight.set_intensity_and_color(value, color, FALSE)
-
-	log_admin("[key_name(usr)] set daylight time to [value == -1 ? "AUTO" : value]")
-	message_admins(span_adminnotice("[key_name_admin(usr)] set daytime: [value == -1 ? "auto" : value]"))
-
-ADMIN_VERB(toggle_daylight_cycle_lock, R_ADMIN, "Toggle Daylight Cycle Lock", "Lock/unlock automatic day-night cycle", ADMIN_CATEGORY_EVENTS)
-	if(!check_rights(R_ADMIN))
-		return
-
-	SSdaylight.cycle_locked = !SSdaylight.cycle_locked
-	if(!SSdaylight.cycle_locked)
-		SSdaylight.time_locked = FALSE
-		SSdaylight.manual_time = -1
-
-	log_admin("[key_name(usr)] [SSdaylight.cycle_locked ? "locked" : "unlocked"] daylight cycle")
-	message_admins(span_adminnotice("[key_name_admin(usr)] [SSdaylight.cycle_locked ? "locked" : "unlocked"] daylight cycle"))
-
-ADMIN_VERB(flash_daylight, R_ADMIN, "Flash Daylight", "Temporarily flash areas with a color", ADMIN_CATEGORY_EVENTS)
-	if(!check_rights(R_ADMIN))
-		return
-
-	var/color = input(usr, "Choose flash color", "Flash Color") as color|null
-	if(isnull(color))
-		return
-
-	var/duration = input(usr, "Set flash duration in seconds", "Flash Duration", 10) as num|null
-	if(isnull(duration))
-		return
-
-	var/transition_time = input(usr, "Set transition time in seconds", "Transition Time", 2) as num|null
-	if(isnull(transition_time))
-		return
-
-	SSdaylight.flash(color, duration SECONDS, transition_time SECONDS)
-
-	log_admin("[key_name(usr)] triggered daylight flash with color [color] for [duration] seconds")
-	message_admins(span_adminnotice("[key_name_admin(usr)] triggered daylight flash with color [color] for [duration] seconds"))
-
-ADMIN_VERB(open_daylight_control_panel, R_ADMIN, "Open Daylight Control Panel", "Open UI panel for day/night and weather control", ADMIN_CATEGORY_EVENTS)
-	if(!check_rights(R_ADMIN))
-		return
-	var/datum/daylight_control_panel/panel = new
-	panel.ui_interact(usr)
-
-/datum/daylight_control_panel/ui_state(mob/user)
-	return ADMIN_STATE(R_ADMIN)
-
-/datum/daylight_control_panel/ui_interact(mob/user, datum/tgui/ui)
-	ui = SStgui.try_update_ui(user, src, ui)
-	if(!ui)
-		ui = new(user, src, "DaylightControl", "Daylight Control")
-		ui.open()
-
-/datum/daylight_control_panel/ui_data(mob/user)
-	var/list/data = list()
-	data["cycle_locked"] = SSdaylight.cycle_locked
-	data["time_locked"] = SSdaylight.time_locked
-	data["manual_time"] = SSdaylight.manual_time
-	data["daylight_cycle"] = SSdaylight.daylight_cycle
-	data["current_intensity"] = SSdaylight.current_intensity
-	data["current_color"] = SSdaylight.current_color
-	data["current_phase"] = SSdaylight.current_phase ? SSdaylight.current_phase.name : "Unknown"
-	data["active_weather_count"] = (SSdaylight.visual_weather_override == "none") ? 0 : 1
-	data["visual_weather_mode"] = SSdaylight.visual_weather_override
-	return data
-
-/datum/daylight_control_panel/ui_act(action, list/params, datum/tgui/ui, datum/ui_state/state)
-	. = ..()
-	if(.)
-		return
-	if(!check_rights_for(ui.user?.client, R_ADMIN))
-		return
-
-	switch(action)
-		if("set_manual")
-			var/value = text2num(params["value"])
-			value = clamp(value, -1, 1)
-			SSdaylight.manual_time = (value < 0 ? -1 : value)
-			SSdaylight.time_locked = (value >= 0)
-			SSdaylight.cycle_locked = (value >= 0)
-			if(value >= 0)
-				var/color = SSdaylight.get_manual_light_color(value)
-				SSdaylight.set_intensity_and_color(value, color, FALSE)
-			return TRUE
-
-		if("set_cycle_minutes")
-			var/new_cycle = clamp(round(text2num(params["value"]), 1), 5, 240)
-			SSdaylight.daylight_cycle = new_cycle
-			SSticker.station_time_rate_multiplier = 1440 / SSdaylight.daylight_cycle
-			return TRUE
-
-		if("toggle_cycle_lock")
-			SSdaylight.cycle_locked = !SSdaylight.cycle_locked
-			if(!SSdaylight.cycle_locked)
-				SSdaylight.time_locked = FALSE
-				SSdaylight.manual_time = -1
-			return TRUE
-
-		if("set_auto")
-			SSdaylight.manual_time = -1
-			SSdaylight.time_locked = FALSE
-			SSdaylight.cycle_locked = FALSE
-			return TRUE
-
-		if("start_weather")
-			var/selected = params["weather_type"]
-			switch(selected)
-				if("rain")
-					SSdaylight.visual_weather_override = "rain"
-				if("snow")
-					SSdaylight.visual_weather_override = "snow"
-				if("radiation")
-					SSdaylight.visual_weather_override = "dust"
-				if("mist")
-					SSdaylight.visual_weather_override = "mist"
-				if("auto")
-					SSdaylight.visual_weather_override = "auto"
-			log_admin("[key_name(ui.user)] switched visual weather to [SSdaylight.visual_weather_override] from daylight control panel")
-			message_admins(span_adminnotice("[key_name_admin(ui.user)] switched visual weather to [SSdaylight.visual_weather_override] from daylight control panel"))
-			return TRUE
-
-		if("stop_weather")
-			SSdaylight.visual_weather_override = "none"
-			log_admin("[key_name(ui.user)] disabled visual weather from daylight control panel")
-			message_admins(span_adminnotice("[key_name_admin(ui.user)] disabled visual weather from daylight control panel"))
-			return TRUE
-
-	return FALSE
-
-/datum/preference/toggle/daylight_tint_fx
-	category = PREFERENCE_CATEGORY_GAME_PREFERENCES
-	savefile_key = "daylight_tint_fx"
-	savefile_identifier = PREFERENCE_PLAYER
-
-/datum/preference/toggle/daylight_tint_fx/create_default_value()
-	return TRUE
-
-/datum/preference/toggle/daylight_particle_fx
-	category = PREFERENCE_CATEGORY_GAME_PREFERENCES
-	savefile_key = "daylight_particle_fx"
-	savefile_identifier = PREFERENCE_PLAYER
-
-/datum/preference/toggle/daylight_particle_fx/create_default_value()
-	return TRUE
-
-
 /obj/effect/light_emitter
 	flags_1 = NO_TURF_MOVEMENT_1
 
@@ -685,48 +470,49 @@ ADMIN_VERB(open_daylight_control_panel, R_ADMIN, "Open Daylight Control Panel", 
 		SSdaylight.unregister_emitter(src)
 	return ..()
 
-/datum/element/daylight_overlay
-	element_flags = ELEMENT_DETACH_ON_HOST_DESTROY
 
-/datum/element/daylight_overlay/Attach(datum/target)
+/atom/movable/screen/plane_master/rendering_plate/lighting_daylight
+	name = "Lighting plate - daylight"
+	documentation = "A layer that containt daylighting"
+	plane = RENDER_PLANE_DAYLIGHT
+	blend_mode_override = BLEND_MULTIPLY
+	mouse_opacity = MOUSE_OPACITY_TRANSPARENT
+	critical = PLANE_CRITICAL_DISPLAY
+	render_relay_planes = list()
+
+/atom/movable/screen/plane_master/rendering_plate/lighting_daylight/show_to(mob/mymob)
 	. = ..()
-	if(!istype(target, /turf))
-		return ELEMENT_INCOMPATIBLE
+	mymob.overlay_fullscreen("daylight_overlay", /atom/movable/screen/fullscreen/lighting_backdrop/Sunlight)
 
-	RegisterSignal(SSdaylight, COMSIG_DAYLIGHT_UPDATED, PROC_REF(update_overlay))
-
-/datum/element/daylight_overlay/Detach(datum/source)
+/atom/movable/screen/plane_master/rendering_plate/lighting_daylight/hide_from(mob/oldmob)
 	. = ..()
-	UnregisterSignal(SSdaylight, COMSIG_DAYLIGHT_UPDATED)
+	oldmob.clear_fullscreen("daylight_overlay")
 
-/datum/element/daylight_overlay/proc/update_overlay(datum/source, intensity, color)
-	SIGNAL_HANDLER
-	// Virtual light only: no direct overlay injection on turfs.
-	if(!istype(source, /datum/controller/subsystem/daylight))
-		return
-
-/atom/movable/screen/fullscreen/daylight_tint
-	icon = 'icons/hud/screen_gen.dmi'
-	screen_loc = "WEST,SOUTH to EAST,NORTH"
-	icon_state = "flash"
-	plane = LIGHTING_PLANE
-	layer = LIGHTING_ABOVE_ALL
-	blend_mode = BLEND_MULTIPLY
-	show_when_dead = TRUE
-	needs_offsetting = FALSE
-	alpha = 0
-
-/atom/movable/screen/fullscreen/daylight_particles
-	icon = 'icons/hud/screen_gen.dmi'
-	screen_loc = "WEST,SOUTH to EAST,NORTH"
-	icon_state = "flash"
-	plane = WEATHER_PLANE
-	layer = FULLSCREEN_LAYER + 1
+/atom/movable/screen/fullscreen/lighting_backdrop/Sunlight
+	transform = null
+	plane = SUNLIGHTING_PLANE
 	blend_mode = BLEND_ADD
 	show_when_dead = TRUE
-	needs_offsetting = FALSE
-	alpha = 0
-	var/current_particle_type = /particles/daylight_weather/mist
+
+/atom/movable/screen/fullscreen/lighting_backdrop/Sunlight/Initialize()
+	. = ..()
+	filters += filter(type="layer", render_source=SUNLIGHTING_RENDER_TARGET)
+	SSdaylight.sunlighting_planes |= src
+	color = SSdaylight.target_color
+
+/atom/movable/screen/fullscreen/lighting_backdrop/Sunlight/Destroy()
+	. = ..()
+	SSdaylight.sunlighting_planes -= src
+
+/atom/movable/screen/fullscreen/lighting_backdrop/Sunlight/proc/apply_daylight_state(intensity, new_color, transition_time = 2 SECONDS)
+	if(QDELETED(src))
+		return
+
+	var/target_alpha = round(clamp(intensity, 0, 1) * 255, 1)
+	color = new_color
+	animate(src, alpha = target_alpha, time = max(1, round(transition_time / (1 SECONDS), 1)))
+
+
 
 /particles/daylight_weather
 	icon = 'icons/effects/particles/generic.dmi'
